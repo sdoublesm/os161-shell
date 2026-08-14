@@ -441,3 +441,8 @@ file		test/semunit.c
 file		test/kmalloctest.c
 file		test/fstest.c
 optfile net	test/nettest.c
+
+# part to add stuff for the project
+
+defoption shellproject
+# for new files, add them here with the "optfile" syntax
