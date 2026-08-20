@@ -32,7 +32,18 @@
 
 
 #include <cdefs.h> /* for __DEAD */
+#include <vnode.h>
+#include "opt-shellproject.h"
+
 struct trapframe; /* from <machine/trapframe.h> */
+
+struct openfile{
+	struct vnode *vn;
+	int mode;
+	off_t offset;
+	struct lock *lk;
+	int ref_count;
+};
 
 /*
  * The system call dispatcher.
@@ -58,5 +69,9 @@ __DEAD void enter_new_process(int argc, userptr_t argv, userptr_t env,
 
 int sys_reboot(int code);
 int sys___time(userptr_t user_seconds, userptr_t user_nanoseconds);
+
+#if OPT_SHELLPROJECT
+/* inserts here the syscalls of the project*/
+#endif
 
 #endif /* _SYSCALL_H_ */

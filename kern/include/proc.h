@@ -37,6 +37,8 @@
  */
 
 #include <spinlock.h>
+#include <limits.h>
+#include "opt-shellproject.h"
 
 struct addrspace;
 struct thread;
@@ -71,6 +73,14 @@ struct proc {
 	struct vnode *p_cwd;		/* current working directory */
 
 	/* add more material here as needed */
+#if OPT_SHELLPROJECT
+	pid_t p_id;
+	pid_t parent_id;
+	bool exit_status;
+	int exit_code;
+	struct cv *cv;
+	struct openfile *fileTable[OPEN_MAX];
+#endif
 };
 
 /* This is the process structure for the kernel and for kernel-only threads. */
