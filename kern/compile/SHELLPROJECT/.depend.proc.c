@@ -3,7 +3,7 @@ proc.o: ../../proc/proc.c ../../include/types.h \
  includelinks/machine/types.h ../../include/spl.h ../../include/cdefs.h \
  ../../include/proc.h ../../include/spinlock.h ../../include/hangman.h \
  opt-hangman.h includelinks/machine/spinlock.h ../../include/limits.h \
- ../../include/kern/limits.h ../../include/current.h \
+ ../../include/kern/limits.h opt-shellproject.h ../../include/current.h \
  includelinks/machine/current.h ../../include/thread.h \
  ../../include/array.h ../../include/lib.h opt-noasserts.h \
  ../../include/threadlist.h includelinks/machine/thread.h \

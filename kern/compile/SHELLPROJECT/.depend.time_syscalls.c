@@ -4,4 +4,4 @@ time_syscalls.o: ../../syscall/time_syscalls.c ../../include/types.h \
  ../../include/kern/time.h ../../include/copyinout.h \
  ../../include/syscall.h ../../include/cdefs.h ../../include/vnode.h \
  ../../include/spinlock.h ../../include/hangman.h opt-hangman.h \
- includelinks/machine/spinlock.h
+ includelinks/machine/spinlock.h opt-shellproject.h

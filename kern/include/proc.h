@@ -63,7 +63,7 @@ struct vnode;
  */
 struct proc {
 	char *p_name;			/* Name of this process */
-	struct spinlock p_lock;		/* Lock for this structure */
+	struct spinlock p_splock;		/* Lock for this structure */
 	unsigned p_numthreads;		/* Number of threads in this process */
 
 	/* VM */
@@ -80,6 +80,8 @@ struct proc {
 	int exit_code;
 	struct cv *cv;
 	struct openfile *fileTable[OPEN_MAX];
+	struct cv *p_cv;
+	struct lock *p_lock;
 #endif
 };
 

@@ -10,6 +10,6 @@ semfs_vnops.o: ../../fs/semfs/semfs_vnops.c ../../include/types.h \
  ../../include/threadlist.h includelinks/machine/thread.h \
  ../../include/setjmp.h includelinks/kern/machine/setjmp.h \
  ../../include/proc.h ../../include/limits.h ../../include/kern/limits.h \
- ../../include/current.h includelinks/machine/current.h \
- ../../include/vfs.h ../../include/vnode.h ../../fs/semfs/semfs.h \
- ../../include/fs.h
+ opt-shellproject.h ../../include/current.h \
+ includelinks/machine/current.h ../../include/vfs.h ../../include/vnode.h \
+ ../../fs/semfs/semfs.h ../../include/fs.h
