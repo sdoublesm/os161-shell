@@ -446,3 +446,4 @@ optfile net	test/nettest.c
 
 defoption shellproject
 # for new files, add them here with the "optfile" syntax
+optfile shellproject syscall/proc_syscalls.c
