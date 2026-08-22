@@ -49,10 +49,98 @@
 #include <addrspace.h>
 #include <vnode.h>
 
+#if OPT_SHELLPROJECT
+#include <synch.h>
+#define MAX_PROC 100
+
+static struct _processTable{
+	int active;
+	struct proc *proc[MAX_PROC+1];
+	int last_i;
+	struct spinlock lk;
+}processTable;
+#endif
+
 /*
  * The process for the kernel; this holds all the kernel-only threads.
  */
 struct proc *kproc;
+
+struct proc * proc_search_pid(pid_t pid){
+#if OPT_SHELLPROJECT
+	struct proc *p;
+	KASSERT(pid >= 0 && pid < MAX_PROC);
+	p = processTable.proc[pid];
+	KASSERT(p->p_id==pid);
+	return p;
+#else
+	(void) pid;
+	return NULL;
+#endif
+}
+
+static void proc_init_waitpid(struct proc *proc, const char *name){
+#if OPT_SHELLPROJECT
+	int i;
+	spinlock_acquire(&processTable.lk);
+	i = processTable.last_i + 1;
+	proc->p_id = 0;
+	if (i > MAX_PROC) i = 1;
+	while (i != processTable.last_i){
+		if (processTable.proc[i] == NULL){
+			processTable.proc[i] = proc;
+			processTable.last_i = i;
+			proc->p_id = i;
+			break;
+		}
+		i++;
+		if (i > MAX_PROC) i = 1;
+	}
+	spinlock_release(&processTable.lk);
+	if (proc->p_id == 0){
+		panic("too many processes. proc table is full \n");
+	}
+	proc->exit_status = 0;
+	proc->parent_id = -1;
+	proc->p_cv = cv_create(name);
+	proc->p_lock = lock_create(name);
+#else
+	(void) proc;
+	(void) name;
+#endif
+}
+
+static void proc_end_waitpid(struct proc *proc){
+#if OPT_SHELLPROJECT
+	int i;
+	spinlock_acquire(&processTable.lk);
+	i = proc->p_id;
+	KASSERT(i > 0 && i <= MAX_PROC);
+	processTable.proc[i] = NULL;
+	spinlock_release(&processTable.lk);
+	cv_destroy(proc->p_cv);
+	lock_destroy(proc->p_lock);
+#else
+	(void) proc;
+#endif
+}
+
+int proc_wait(struct proc *proc){
+#if OPT_SHELLPROJECT
+	int return_status;
+	KASSERT(proc != NULL);
+	KASSERT(proc != kproc);
+	lock_acquire(proc->p_lock);
+	cv_wait(proc->p_cv, proc->p_lock);
+	lock_release(proc->p_lock);
+	return_status = proc->exit_status;
+	proc_destroy(proc);
+	return return_status;
+#else
+	(void) proc;
+	return 0;
+#endif
+}
 
 /*
  * Create a proc structure.
@@ -81,6 +169,8 @@ proc_create(const char *name)
 
 	/* VFS fields */
 	proc->p_cwd = NULL;
+
+	proc_init_waitpid(proc, name);
 
 	return proc;
 }
@@ -168,6 +258,8 @@ proc_destroy(struct proc *proc)
 	KASSERT(proc->p_numthreads == 0);
 	spinlock_cleanup(&proc->p_lock);
 
+	proc_end_waitpid(proc);
+
 	kfree(proc->p_name);
 	kfree(proc);
 }
@@ -182,6 +274,10 @@ proc_bootstrap(void)
 	if (kproc == NULL) {
 		panic("proc_create for kproc failed\n");
 	}
+#if OPT_SHELLPROJECT
+	spinlock_init(&processTable.lk);
+	processTable.active = 1;
+#endif
 }
 
 /*

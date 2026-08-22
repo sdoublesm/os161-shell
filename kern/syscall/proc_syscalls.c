@@ -45,3 +45,21 @@ void sys__exit(int exitcode){
     panic("thread_exit returned (should not happen)\n");
     (void) exitcode;
 }
+
+int sys_waitpid(pid_t pid, int *status, int options){
+#if OPT_SHELLPROJECT
+    struct proc *p = proc_search_pid(pid);
+    int s;
+    (void) options;
+    if (p == NULL) return -1;
+    s = proc_wait(p);
+    if (status != NULL)
+        *(int *) status = s;
+    return pid;
+#else
+    (void) options;
+    (void) pid;
+    (void) status;
+    return -1;
+#endif
+}
