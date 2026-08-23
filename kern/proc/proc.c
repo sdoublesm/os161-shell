@@ -68,10 +68,14 @@ struct proc *kproc;
 
 struct proc * proc_search_pid(pid_t pid){
 #if OPT_SHELLPROJECT
+	if (pid <= 0 || pid > MAX_PROC) return NULL;
+
 	struct proc *p;
-	KASSERT(pid >= 0 && pid < MAX_PROC);
+
 	p = processTable.proc[pid];
-	KASSERT(p->p_id==pid);
+
+	if (p->p_id != pid) return NULL;
+	
 	return p;
 #else
 	(void) pid;
@@ -139,6 +143,20 @@ int proc_wait(struct proc *proc){
 #else
 	(void) proc;
 	return 0;
+#endif
+}
+
+int check_child(struct proc * parent, pid_t child_pid){
+#if OPT_SHELLPROJECT
+	struct child_node *curr = parent->children_list;
+	while (curr != NULL){
+		if (curr->c_pid == child_pid) return 1;
+		curr = curr->next;
+	}
+	return 0;
+#else
+	(void) parent;
+	(void) child_pid;
 #endif
 }
 

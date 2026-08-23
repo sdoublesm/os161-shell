@@ -44,6 +44,13 @@ struct addrspace;
 struct thread;
 struct vnode;
 
+#if OPT_SHELLPROJECT
+struct child_node{
+	pid_t c_pid;
+	struct child_node* next;
+};
+#endif
+
 /*
  * Process structure.
  *
@@ -76,8 +83,9 @@ struct proc {
 #if OPT_SHELLPROJECT
 	pid_t p_id;
 	pid_t parent_id;
-	bool exit_status;
-	int exit_code;
+	struct child_node *children_list;
+	int exit_status;
+	bool has_exited;
 	struct openfile *fileTable[OPEN_MAX];
 	struct cv *p_cv;
 	struct lock *p_lock;
@@ -108,8 +116,14 @@ struct addrspace *proc_getas(void);
 /* Change the address space of the current process, and return the old one. */
 struct addrspace *proc_setas(struct addrspace *);
 
+#if OPT_SHELLPROJECT
+
 struct proc * proc_search_pid(pid_t pid);
 
 int proc_wait(struct proc *proc);
+
+int check_child(struct proc * parent, pid_t child_pid);
+
+#endif
 
 #endif /* _PROC_H_ */
