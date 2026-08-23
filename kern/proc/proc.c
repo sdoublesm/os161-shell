@@ -83,6 +83,84 @@ struct proc * proc_search_pid(pid_t pid){
 #endif
 }
 
+int clear_children_list(struct proc *parent){
+#if OPT_SHELLPROJECT
+	struct child_node *curr = parent->children_list;
+	struct proc *child;
+
+	while (curr != NULL){
+		parent->children_list = curr->next;
+
+		child = proc_search_pid(curr->c_pid);
+		if (child == NULL) return -1;
+
+		child->parent_id = -1;
+		curr->next = NULL;
+		kfree(curr);
+
+		curr = parent->children_list;
+	}
+
+	return 0;
+#else
+	(void) parent;
+#endif
+}
+
+int insert_child_in_partent(struct proc *parent, pid_t c_pid){
+#if OPT_SHELLPROJECT
+	struct child_node *curr = parent->children_list;
+
+	if (parent->children_list == NULL){
+		parent->children_list = (struct child_node *) kmalloc(sizeof(struct child_node));
+		if (parent->children_list == NULL) return -1;
+
+		parent->children_list->next = NULL;
+		parent->children_list->c_pid = c_pid;
+		return 0;
+	}
+	
+	while (curr->next != NULL) curr = curr->next;
+
+	curr->next = (struct child_node *) kmalloc(sizeof(struct child_node));
+	if (curr->next == NULL) return -1;
+
+	curr->next->next = NULL;
+	curr->next->c_pid = c_pid;
+	return 0;
+#else
+	(void) parent;
+	(void) c_pid;
+#endif
+}
+
+int remove_child_from_parent(struct proc *parent, pid_t c_pid){
+#if OPT_SHELLPROJECT
+	struct child_node *curr = parent->children_list;
+	struct child_node *prev = NULL;
+
+	while (curr != NULL){
+		if (curr->c_pid == c_pid){
+			if (prev == NULL)
+				parent->children_list = curr->next;
+			else
+				prev->next = curr->next;
+
+			kfree(curr);
+			return 0;
+		}
+
+		prev = curr;
+		curr = curr->next;
+	}
+
+	return -1;
+#else
+	(void) parent;
+	(void) c_id;
+#endif
+}
+
 static void proc_init_waitpid(struct proc *proc, const char *name){
 #if OPT_SHELLPROJECT
 	int i;
@@ -105,7 +183,9 @@ static void proc_init_waitpid(struct proc *proc, const char *name){
 		panic("too many processes. proc table is full \n");
 	}
 	proc->exit_status = 0;
+	proc->has_exited = false;
 	proc->parent_id = -1;
+	proc->children_list = NULL;
 	proc->p_cv = cv_create(name);
 	proc->p_lock = lock_create(name);
 #else
@@ -124,6 +204,20 @@ static void proc_end_waitpid(struct proc *proc){
 	spinlock_release(&processTable.lk);
 	cv_destroy(proc->p_cv);
 	lock_destroy(proc->p_lock);
+
+	if (clear_children_list(proc) == -1) return -1;
+
+	if (proc->parent_id != -1){
+		struct proc *parent = proc_search_pid(proc->parent_id);
+
+		if (proc->parent_id == kproc->p_id) parent = kproc;
+
+		if (parent == NULL) return -1;
+
+		if (remove_child_from_parent(parent, proc->p_id) == -1) return -1;
+	}
+
+	return 0;
 #else
 	(void) proc;
 #endif
@@ -146,11 +240,11 @@ int proc_wait(struct proc *proc){
 #endif
 }
 
-int check_child(struct proc * parent, pid_t child_pid){
+int check_child(struct proc * parent, pid_t c_pid){
 #if OPT_SHELLPROJECT
 	struct child_node *curr = parent->children_list;
 	while (curr != NULL){
-		if (curr->c_pid == child_pid) return 1;
+		if (curr->c_pid == c_pid) return 1;
 		curr = curr->next;
 	}
 	return 0;
