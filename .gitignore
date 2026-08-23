@@ -1,0 +1,8 @@
+kern/compile
+*.o
+*.a
+*.depend
+sys161.log
+*.img
+*~
+*.swp

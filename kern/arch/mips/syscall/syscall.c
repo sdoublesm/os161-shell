@@ -105,10 +105,21 @@ syscall(struct trapframe *tf)
 		break;
 
 	    case SYS___time:
-		err = sys___time((userptr_t)tf->tf_a0,
-				 (userptr_t)tf->tf_a1);
+		err = sys___time((userptr_t)(uintptr_t)tf->tf_a0,
+						(userptr_t)(uintptr_t)tf->tf_a1);
 		break;
 
+		case SYS_write:
+		// a0 filedescriptor
+		// a1 
+		// a2
+		// stdoutput fd=1
+		if ((int)tf->tf_a0==1 && (int)tf->tf_a2==1){
+			// output to stdout
+			kprintf("%c", *(char*)(uintptr_t)tf->tf_a1);		
+		}
+		err=0;
+		break;
 	    /* Add stuff here */
 
 	    default:
