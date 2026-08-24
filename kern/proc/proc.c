@@ -107,7 +107,7 @@ int clear_children_list(struct proc *parent){
 #endif
 }
 
-int insert_child_in_partent(struct proc *parent, pid_t c_pid){
+int insert_child_in_parent(struct proc *parent, pid_t c_pid){
 #if OPT_SHELLPROJECT
 	struct child_node *curr = parent->children_list;
 
@@ -161,13 +161,13 @@ int remove_child_from_parent(struct proc *parent, pid_t c_pid){
 #endif
 }
 
-static void proc_init_waitpid(struct proc *proc, const char *name){
+static void proc_init(struct proc *proc, const char *name){
 #if OPT_SHELLPROJECT
 	int i;
 	spinlock_acquire(&processTable.lk);
 	i = processTable.last_i + 1;
-	proc->p_id = 0;
-	if (i > MAX_PROC) i = 1;
+	proc->p_id = -1;
+	if (i > MAX_PROC) i = 1;	// not from 0 because it is the kernell process
 	while (i != processTable.last_i){
 		if (processTable.proc[i] == NULL){
 			processTable.proc[i] = proc;
@@ -179,7 +179,7 @@ static void proc_init_waitpid(struct proc *proc, const char *name){
 		if (i > MAX_PROC) i = 1;
 	}
 	spinlock_release(&processTable.lk);
-	if (proc->p_id == 0){
+	if (proc->p_id == -1){
 		panic("too many processes. proc table is full \n");
 	}
 	proc->exit_status = 0;
@@ -194,7 +194,7 @@ static void proc_init_waitpid(struct proc *proc, const char *name){
 #endif
 }
 
-static void proc_end_waitpid(struct proc *proc){
+static void proc_end(struct proc *proc){
 #if OPT_SHELLPROJECT
 	int i;
 	spinlock_acquire(&processTable.lk);
@@ -232,7 +232,7 @@ int proc_wait(struct proc *proc){
 	cv_wait(proc->p_cv, proc->p_lock);
 	lock_release(proc->p_lock);
 	return_status = proc->exit_status;
-	proc_destroy(proc);
+//  proc_destroy(proc);
 	return return_status;
 #else
 	(void) proc;
@@ -282,7 +282,7 @@ proc_create(const char *name)
 	/* VFS fields */
 	proc->p_cwd = NULL;
 
-	proc_init_waitpid(proc, name);
+	proc_init(proc, name);
 
 	return proc;
 }
@@ -370,7 +370,7 @@ proc_destroy(struct proc *proc)
 	KASSERT(proc->p_numthreads == 0);
 	spinlock_cleanup(&proc->p_lock);
 
-	proc_end_waitpid(proc);
+	proc_end(proc);
 
 	kfree(proc->p_name);
 	kfree(proc);

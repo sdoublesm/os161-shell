@@ -72,6 +72,13 @@ int sys_waitpid(pid_t pid, int *status, int options){
         return -1;
     }
 
+    // let's find the process, if it doesn't exist, error EINVAL
+    struct proc *p = proc_search_pid(pid);
+    if (p == NULL){
+        errno = ESRCH;
+        return -1;
+    }
+
     // different values for options. It should be 0, but some options could be implemented
     // here for example WNOHANG is implemented
     // if wrong value of options is given, error EINVAL
@@ -79,19 +86,13 @@ int sys_waitpid(pid_t pid, int *status, int options){
         case 0:
             break;
         case WNOHANG:
-            return 0;
+            if (!(p->has_exited))
+                return 0;
             break;
         default:
             errno = EINVAL;
             return -1;
             break;
-    }
-
-    // let's find the process, if it doesn't exist, error EINVAL
-    struct proc *p = proc_search_pid(pid);
-    if (p == NULL){
-        errno = ESRCH;
-        return -1;
     }
 
     int s;
