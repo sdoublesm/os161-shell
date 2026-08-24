@@ -19,6 +19,7 @@
 #include <syscall.h>
 #include <synch.h>
 #include <../../userland/include/errno.h>
+#include <mips/trapframe.h>
 
 pid_t sys_getpid(void){
 #if OPT_SHELLPROJECT
@@ -118,5 +119,76 @@ int sys_waitpid(pid_t pid, int *status, int options){
     (void) pid;
     (void) status;
     return -1;
+#endif
+}
+
+static void call_enter_forked_process(void *tfv, unsigned long dummy){
+#if OPT_SHELLPROJECT
+	struct trapframe *tf = (struct trapframe *) tfv;
+	(void) dummy;
+
+	enter_forked_process(tf);
+
+	panic("enter_forked_process returned (should not happen)");
+#else
+	(void) tfv;
+	(void) dummy;
+#endif
+}
+
+int sys_fork(struct trapframe *ctf){
+#if OPT_SHELLPROJECT
+    struct trapframe *tf_child;
+    struct proc *cp;
+    int result;
+
+    KASSERT(curproc != NULL);
+
+    if (!proc_find_free_slot()){
+        errno = ENPROC;
+        return -1;
+    }
+
+    cp = proc_create_runprogram(curproc->p_name);
+    if (cp == NULL){
+        errno = ENOMEM;
+        return -1;
+    }
+
+    as_copy(curproc->p_addrspace, &(cp->p_addrspace));
+    if (cp->p_addrspace == NULL){
+        proc_destroy(cp);
+        errno = ENOMEM;
+        return -1;
+    }
+
+    tf_child = kmalloc(sizeof(struct trapframe));
+    if (tf_child == NULL){
+        proc_destroy(cp);
+        errno = ENOMEM;
+        return -1;
+    }
+    memcpy(tf_child, ctf, sizeof(struct trapframe));
+
+    // For Mirko: insert here the procedure for copying the file descriptors
+
+    if (proc_insert_child_in_parent(curproc, cp->p_id) == -1){
+        proc_destroy(cp);
+        errno = ENOMEM;
+        return -1;
+    }
+    cp->parent_id = curproc->p_id;
+
+    result = thread_fork(curthread->t_name, cp, call_enter_forked_process, (void *) tf_child, (unsigned long) 0);
+    if (result){
+        proc_destroy(cp);
+        kfree(tf_child);
+        errno = ENOMEM;
+        return -1;
+    }
+
+    return cp->p_id;
+#else
+    (void) ctf;
 #endif
 }

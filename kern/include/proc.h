@@ -118,11 +118,15 @@ struct addrspace *proc_setas(struct addrspace *);
 
 #if OPT_SHELLPROJECT
 
+bool proc_find_free_slot(void);
+
 struct proc * proc_search_pid(pid_t pid);
+
+int proc_insert_child_in_parent(struct proc *parent, pid_t c_pid);
 
 int proc_wait(struct proc *proc);
 
-int check_child(struct proc * parent, pid_t child_pid);
+int proc_check_child(struct proc * parent, pid_t child_pid);
 
 #endif
 

@@ -66,6 +66,21 @@ static struct _processTable{
  */
 struct proc *kproc;
 
+bool proc_find_free_slot(void){
+#if OPT_SHELLPROJECT
+	int curr = processTable.last_i + 1;
+	if (curr > MAX_PROC) curr = 1;
+	while (curr != processTable.last_i){
+		if (processTable.proc[curr] == NULL) return true;
+
+		curr++;
+		if (curr > MAX_PROC) curr = 1;
+	}
+
+	return false;
+#endif
+}
+
 struct proc * proc_search_pid(pid_t pid){
 #if OPT_SHELLPROJECT
 	if (pid <= 0 || pid > MAX_PROC) return NULL;
@@ -83,7 +98,7 @@ struct proc * proc_search_pid(pid_t pid){
 #endif
 }
 
-int clear_children_list(struct proc *parent){
+int proc_clear_children_list(struct proc *parent){
 #if OPT_SHELLPROJECT
 	struct child_node *curr = parent->children_list;
 	struct proc *child;
@@ -107,7 +122,7 @@ int clear_children_list(struct proc *parent){
 #endif
 }
 
-int insert_child_in_parent(struct proc *parent, pid_t c_pid){
+int proc_insert_child_in_parent(struct proc *parent, pid_t c_pid){
 #if OPT_SHELLPROJECT
 	struct child_node *curr = parent->children_list;
 
@@ -134,7 +149,7 @@ int insert_child_in_parent(struct proc *parent, pid_t c_pid){
 #endif
 }
 
-int remove_child_from_parent(struct proc *parent, pid_t c_pid){
+int proc_remove_child_from_parent(struct proc *parent, pid_t c_pid){
 #if OPT_SHELLPROJECT
 	struct child_node *curr = parent->children_list;
 	struct child_node *prev = NULL;
@@ -205,7 +220,7 @@ static void proc_end(struct proc *proc){
 	cv_destroy(proc->p_cv);
 	lock_destroy(proc->p_lock);
 
-	if (clear_children_list(proc) == -1) return -1;
+	if (proc_clear_children_list(proc) == -1) return -1;
 
 	if (proc->parent_id != -1){
 		struct proc *parent = proc_search_pid(proc->parent_id);
@@ -214,7 +229,7 @@ static void proc_end(struct proc *proc){
 
 		if (parent == NULL) return -1;
 
-		if (remove_child_from_parent(parent, proc->p_id) == -1) return -1;
+		if (proc_remove_child_from_parent(parent, proc->p_id) == -1) return -1;
 	}
 
 	return 0;
@@ -240,7 +255,7 @@ int proc_wait(struct proc *proc){
 #endif
 }
 
-int check_child(struct proc * parent, pid_t c_pid){
+int proc_check_child(struct proc * parent, pid_t c_pid){
 #if OPT_SHELLPROJECT
 	struct child_node *curr = parent->children_list;
 	while (curr != NULL){
@@ -389,6 +404,9 @@ proc_bootstrap(void)
 #if OPT_SHELLPROJECT
 	spinlock_init(&processTable.lk);
 	processTable.active = 1;
+	processTable.proc[0] = kproc;
+	for (int i = 1; i <= MAX_PROC; i++) processTable.proc[i] = NULL;
+	processTable.last_i = 0;
 #endif
 }
 

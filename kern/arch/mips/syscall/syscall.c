@@ -35,6 +35,7 @@
 #include <thread.h>
 #include <current.h>
 #include <syscall.h>
+#include <addrspace.h>
 
 
 /*
@@ -157,5 +158,17 @@ syscall(struct trapframe *tf)
 void
 enter_forked_process(struct trapframe *tf)
 {
+#if OPT_SHELLPROJECT
+	struct trapframe forkedTf = *tf;
+
+	forkedTf.tf_v0 = 0;
+	forkedTf.tf_a3 = 0;
+	forkedTf.tf_epc += 4;
+
+	as_activate();
+
+	mips_usermode(&forkedTf);
+#else
 	(void)tf;
+#endif
 }
