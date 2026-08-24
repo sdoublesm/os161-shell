@@ -179,21 +179,26 @@ int proc_remove_child_from_parent(struct proc *parent, pid_t c_pid){
 static void proc_init(struct proc *proc, const char *name){
 #if OPT_SHELLPROJECT
 	int i;
-	spinlock_acquire(&processTable.lk);
-	i = processTable.last_i + 1;
-	proc->p_id = -1;
-	if (i > MAX_PROC) i = 1;	// not from 0 because it is the kernell process
-	while (i != processTable.last_i){
-		if (processTable.proc[i] == NULL){
-			processTable.proc[i] = proc;
-			processTable.last_i = i;
-			proc->p_id = i;
-			break;
-		}
-		i++;
-		if (i > MAX_PROC) i = 1;
+	if (strcmp(name, "[kernel]") == 0){
+		processTable.proc[0] = kproc;
 	}
-	spinlock_release(&processTable.lk);
+	else{
+		spinlock_acquire(&processTable.lk);
+		i = processTable.last_i + 1;
+		proc->p_id = -1;
+		if (i > MAX_PROC) i = 1;	// not from 0 because it is the kernell process
+		while (i != processTable.last_i){
+			if (processTable.proc[i] == NULL){
+				processTable.proc[i] = proc;
+				processTable.last_i = i;
+				proc->p_id = i;
+				break;
+			}
+			i++;
+			if (i > MAX_PROC) i = 1;
+		}
+		spinlock_release(&processTable.lk);
+	}
 	if (proc->p_id == -1){
 		panic("too many processes. proc table is full \n");
 	}
@@ -404,7 +409,6 @@ proc_bootstrap(void)
 #if OPT_SHELLPROJECT
 	spinlock_init(&processTable.lk);
 	processTable.active = 1;
-	processTable.proc[0] = kproc;
 	for (int i = 1; i <= MAX_PROC; i++) processTable.proc[i] = NULL;
 	processTable.last_i = 0;
 #endif
