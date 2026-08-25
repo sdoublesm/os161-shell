@@ -49,10 +49,230 @@
 #include <addrspace.h>
 #include <vnode.h>
 
+#if OPT_SHELLPROJECT
+#include <synch.h>
+#define MAX_PROC 100
+
+static struct _processTable{
+	int active;
+	struct proc *proc[MAX_PROC+1];
+	int last_i;
+	struct spinlock lk;
+}processTable;
+#endif
+
 /*
  * The process for the kernel; this holds all the kernel-only threads.
  */
 struct proc *kproc;
+
+bool proc_find_free_slot(void){
+#if OPT_SHELLPROJECT
+	int curr = processTable.last_i + 1;
+	if (curr > MAX_PROC) curr = 1;
+	while (curr != processTable.last_i){
+		if (processTable.proc[curr] == NULL) return true;
+
+		curr++;
+		if (curr > MAX_PROC) curr = 1;
+	}
+
+	return false;
+#endif
+}
+
+struct proc * proc_search_pid(pid_t pid){
+#if OPT_SHELLPROJECT
+	if (pid <= 0 || pid > MAX_PROC) return NULL;
+
+	struct proc *p;
+
+	p = processTable.proc[pid];
+
+	if (p->p_id != pid) return NULL;
+	
+	return p;
+#else
+	(void) pid;
+	return NULL;
+#endif
+}
+
+int proc_clear_children_list(struct proc *parent){
+#if OPT_SHELLPROJECT
+	struct child_node *curr = parent->children_list;
+	struct proc *child;
+
+	while (curr != NULL){
+		parent->children_list = curr->next;
+
+		child = proc_search_pid(curr->c_pid);
+		if (child == NULL) return -1;
+
+		child->parent_id = -1;
+		curr->next = NULL;
+		kfree(curr);
+
+		curr = parent->children_list;
+	}
+
+	return 0;
+#else
+	(void) parent;
+#endif
+}
+
+int proc_insert_child_in_parent(struct proc *parent, pid_t c_pid){
+#if OPT_SHELLPROJECT
+	struct child_node *curr = parent->children_list;
+
+	if (parent->children_list == NULL){
+		parent->children_list = (struct child_node *) kmalloc(sizeof(struct child_node));
+		if (parent->children_list == NULL) return -1;
+
+		parent->children_list->next = NULL;
+		parent->children_list->c_pid = c_pid;
+		return 0;
+	}
+	
+	while (curr->next != NULL) curr = curr->next;
+
+	curr->next = (struct child_node *) kmalloc(sizeof(struct child_node));
+	if (curr->next == NULL) return -1;
+
+	curr->next->next = NULL;
+	curr->next->c_pid = c_pid;
+	return 0;
+#else
+	(void) parent;
+	(void) c_pid;
+#endif
+}
+
+int proc_remove_child_from_parent(struct proc *parent, pid_t c_pid){
+#if OPT_SHELLPROJECT
+	struct child_node *curr = parent->children_list;
+	struct child_node *prev = NULL;
+
+	while (curr != NULL){
+		if (curr->c_pid == c_pid){
+			if (prev == NULL)
+				parent->children_list = curr->next;
+			else
+				prev->next = curr->next;
+
+			kfree(curr);
+			return 0;
+		}
+
+		prev = curr;
+		curr = curr->next;
+	}
+
+	return -1;
+#else
+	(void) parent;
+	(void) c_id;
+#endif
+}
+
+static void proc_init(struct proc *proc, const char *name){
+#if OPT_SHELLPROJECT
+	int i;
+	if (strcmp(name, "[kernel]") == 0){
+		processTable.proc[0] = kproc;
+	}
+	else{
+		spinlock_acquire(&processTable.lk);
+		i = processTable.last_i + 1;
+		proc->p_id = -1;
+		if (i > MAX_PROC) i = 1;	// not from 0 because it is the kernell process
+		while (i != processTable.last_i){
+			if (processTable.proc[i] == NULL){
+				processTable.proc[i] = proc;
+				processTable.last_i = i;
+				proc->p_id = i;
+				break;
+			}
+			i++;
+			if (i > MAX_PROC) i = 1;
+		}
+		spinlock_release(&processTable.lk);
+	}
+	if (proc->p_id == -1){
+		panic("too many processes. proc table is full \n");
+	}
+	proc->exit_status = 0;
+	proc->has_exited = false;
+	proc->parent_id = -1;
+	proc->children_list = NULL;
+	proc->p_cv = cv_create(name);
+	proc->p_lock = lock_create(name);
+#else
+	(void) proc;
+	(void) name;
+#endif
+}
+
+static void proc_end(struct proc *proc){
+#if OPT_SHELLPROJECT
+	int i;
+	spinlock_acquire(&processTable.lk);
+	i = proc->p_id;
+	KASSERT(i > 0 && i <= MAX_PROC);
+	processTable.proc[i] = NULL;
+	spinlock_release(&processTable.lk);
+	cv_destroy(proc->p_cv);
+	lock_destroy(proc->p_lock);
+
+	if (proc_clear_children_list(proc) == -1) return -1;
+
+	if (proc->parent_id != -1){
+		struct proc *parent = proc_search_pid(proc->parent_id);
+
+		if (proc->parent_id == kproc->p_id) parent = kproc;
+
+		if (parent == NULL) return -1;
+
+		if (proc_remove_child_from_parent(parent, proc->p_id) == -1) return -1;
+	}
+
+	return 0;
+#else
+	(void) proc;
+#endif
+}
+
+int proc_wait(struct proc *proc){
+#if OPT_SHELLPROJECT
+	int return_status;
+	KASSERT(proc != NULL);
+	KASSERT(proc != kproc);
+	lock_acquire(proc->p_lock);
+	cv_wait(proc->p_cv, proc->p_lock);
+	lock_release(proc->p_lock);
+	return_status = proc->exit_status;
+//  proc_destroy(proc);
+	return return_status;
+#else
+	(void) proc;
+	return 0;
+#endif
+}
+
+int proc_check_child(struct proc * parent, pid_t c_pid){
+#if OPT_SHELLPROJECT
+	struct child_node *curr = parent->children_list;
+	while (curr != NULL){
+		if (curr->c_pid == c_pid) return 1;
+		curr = curr->next;
+	}
+	return 0;
+#else
+	(void) parent;
+	(void) child_pid;
+#endif
+}
 
 /*
  * Create a proc structure.
@@ -81,6 +301,8 @@ proc_create(const char *name)
 
 	/* VFS fields */
 	proc->p_cwd = NULL;
+
+	proc_init(proc, name);
 
 	return proc;
 }
@@ -168,6 +390,8 @@ proc_destroy(struct proc *proc)
 	KASSERT(proc->p_numthreads == 0);
 	spinlock_cleanup(&proc->p_lock);
 
+	proc_end(proc);
+
 	kfree(proc->p_name);
 	kfree(proc);
 }
@@ -182,6 +406,12 @@ proc_bootstrap(void)
 	if (kproc == NULL) {
 		panic("proc_create for kproc failed\n");
 	}
+#if OPT_SHELLPROJECT
+	spinlock_init(&processTable.lk);
+	processTable.active = 1;
+	for (int i = 1; i <= MAX_PROC; i++) processTable.proc[i] = NULL;
+	processTable.last_i = 0;
+#endif
 }
 
 /*
