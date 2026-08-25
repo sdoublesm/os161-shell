@@ -54,31 +54,19 @@ int sys_waitpid(pid_t pid, int *status, int options){
 
     // cannot wait on itself
     // if so, error ECHILD
-    if (pid == curproc->p_id){
-        errno = ECHILD;
-        return -1;
-    }
+    if (pid == curproc->p_id) return ECHILD;
 
     // cannot wait on a process which is not its child
     // if so, error ECHILD
-    if (!check_child(curproc, pid)){
-        errno = ECHILD;
-        return -1;
-    }
+    if (!check_child(curproc, pid)) return ECHILD;
 
     // the status pointer has to be addressed to a multiple of 4 address
     // if not (so it is unaligned), it cannot contain an integer, so error EFAULT
-    if ((vaddr_t) status % 4 != 0){
-        errno = EFAULT;
-        return -1;
-    }
+    if ((vaddr_t) status % 4 != 0) return EFAULT;
 
     // let's find the process, if it doesn't exist, error EINVAL
     struct proc *p = proc_search_pid(pid);
-    if (p == NULL){
-        errno = ESRCH;
-        return -1;
-    }
+    if (p == NULL) return ESRCH;
 
     // different values for options. It should be 0, but some options could be implemented
     // here for example WNOHANG is implemented
@@ -91,8 +79,7 @@ int sys_waitpid(pid_t pid, int *status, int options){
                 return 0;
             break;
         default:
-            errno = EINVAL;
-            return -1;
+            return EINVAL;
             break;
     }
 
@@ -105,10 +92,7 @@ int sys_waitpid(pid_t pid, int *status, int options){
     }
     if (status != NULL){
         int err = copyout(&s, (userptr_t) status, sizeof(int));
-        if (err){
-            errno = err;    // err should be automatically EFAULT if it was an invalid pointer
-            return -1;
-        }
+        if (err) return err;    // err should be automatically EFAULT if it was an invalid pointer
     }
 
     proc_destroy(p);
@@ -144,29 +128,21 @@ int sys_fork(struct trapframe *ctf){
 
     KASSERT(curproc != NULL);
 
-    if (!proc_find_free_slot()){
-        errno = ENPROC;
-        return -1;
-    }
+    if (!proc_find_free_slot()) return ENPROC;
 
     cp = proc_create_runprogram(curproc->p_name);
-    if (cp == NULL){
-        errno = ENOMEM;
-        return -1;
-    }
+    if (cp == NULL) return ENOMEM;
 
     as_copy(curproc->p_addrspace, &(cp->p_addrspace));
     if (cp->p_addrspace == NULL){
         proc_destroy(cp);
-        errno = ENOMEM;
-        return -1;
+        return ENOMEM;
     }
 
     tf_child = kmalloc(sizeof(struct trapframe));
     if (tf_child == NULL){
         proc_destroy(cp);
-        errno = ENOMEM;
-        return -1;
+        return ENOMEM;
     }
     memcpy(tf_child, ctf, sizeof(struct trapframe));
 
@@ -174,8 +150,7 @@ int sys_fork(struct trapframe *ctf){
 
     if (proc_insert_child_in_parent(curproc, cp->p_id) == -1){
         proc_destroy(cp);
-        errno = ENOMEM;
-        return -1;
+        return ENOMEM;
     }
     cp->parent_id = curproc->p_id;
 
@@ -183,12 +158,146 @@ int sys_fork(struct trapframe *ctf){
     if (result){
         proc_destroy(cp);
         kfree(tf_child);
-        errno = ENOMEM;
-        return -1;
+        return ENOMEM;
     }
 
     return cp->p_id;
 #else
     (void) ctf;
+#endif
+}
+
+int sys_execv(const char *program, char **args){
+#if OPT_SHELLPROJECT
+	struct vnode *v;
+	vaddr_t entrypoint, stackptr;
+	int result;
+
+    // safe copy of the program name from user space to kernel space
+    char *kern_prog = (char *) kmalloc(PATH_MAX * sizeof(char));
+    if (kern_prog == NULL){
+        return ENOMEM;
+    }
+    result = copyinstr((userptr_t) program, kern_prog, PATH_MAX, NULL);
+    if (result){
+        kfree(kern_prog);
+        return result;
+    }
+
+    // safe copy of the args array from user space to kernel space
+    userptr_t temp_ptr;
+    int argc = 0;
+    // first we have to count exactly how many arguments we have
+    while(1){
+        result = copyin((userptr_t)args + (argc*sizeof(userptr_t)), &temp_ptr, sizeof(userptr_t));
+        if (result){
+            kfree(kern_prog);
+            return result;
+        }
+        if (temp_ptr == NULL) break;
+        argc++;
+    }
+    if (argc == 0){
+        kfree(kern_prog);
+        return EINVAL;
+    }
+
+    // now we can actually allocate space for the arguments and copy them
+    char **kargs = (char **) kmalloc(argc * sizeof(char *));
+    if (kargs == NULL){
+        kfree(kern_prog);
+        return ENOMEM;
+    }
+    for (int i = 0; i < argc; i++){
+        kargs[i] = (char *) kmalloc(128 * sizeof(char));
+        if (kargs[i] == NULL){
+            for (int j = i-1; j >= 0; j--) kfree(kargs[j]);
+            kfree(kargs);
+            kfree(kern_prog);
+            return ENOMEM;
+        }
+        userptr_t str_ptr;
+        result = copyin((userptr_t)args + (i*sizeof(userptr_t)), &str_ptr, sizeof(userptr_t));
+        if (result){
+            for (int j = i; j >= 0; j--) kfree(kargs[j]);
+            kfree(kargs);
+            kfree(kern_prog);
+            return result;
+        }
+        size_t actual_length;
+        result = copyinstr(str_ptr, kargs[i], 128, &actual_length);
+        if (result){
+            for (int j = i; j >= 0; j--) kfree(kargs[j]);
+            kfree(kargs);
+            kfree(kern_prog);
+            return result;
+        }
+    }
+
+	/* Open the file. */
+	result = vfs_open(kern_prog, O_RDONLY, 0, &v);
+	if (result) {
+        for (int i = 0; i < argc; i++) kfree(kargs[i]);
+        kfree(kargs);
+        kfree(kern_prog);
+		return result;
+	}
+
+    struct addrspace *old_as;
+    struct addrspace *new_as;
+
+    // let's now create the new address space
+    new_as = as_create();
+    if (new_as == NULL){
+        vfs_close(v);
+        for (int i = 0; i < argc; i++) kfree(kargs[i]);
+        kfree(kargs);
+        kfree(kern_prog);
+        return ENOMEM;
+    }
+
+    // we save the old address space for later destruction
+    old_as = proc_getas();
+
+    // we switch to the new as and activate it
+    proc_setas(new_as);
+    as_activate();
+
+    /* Load the executable. */
+	result = load_elf(v, &entrypoint);
+	if (result) {
+		/* p_addrspace will go away when curproc is destroyed */
+		vfs_close(v);
+        for (int i = 0; i < argc; i++) kfree(kargs[i]);
+        kfree(kargs);
+        kfree(kern_prog);
+		return result;
+	}
+
+    vfs_close(v);
+
+    // we create the user's stack in the new as
+    result = as_define_stack(new_as, &stackptr);
+    if (result) {
+        for (int i = 0; i < argc; i++) kfree(kargs[i]);
+        kfree(kargs);
+        kfree(kern_prog);
+		return result;
+	}
+
+    // destruction of the old as
+    if (old_as != NULL) as_destroy(old_as);
+
+	/* Warp to user mode. */
+	enter_new_process(0 /*argc*/, NULL /*userspace addr of argv*/,
+			  NULL /*userspace addr of environment*/,
+			  stackptr, entrypoint);
+
+	/* enter_new_process does not return. */
+	panic("enter_new_process returned\n");
+	return EINVAL;
+#else
+    (void) program;
+    (void) args;
 #endif
 }
