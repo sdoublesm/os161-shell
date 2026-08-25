@@ -26,7 +26,7 @@ pid_t sys_getpid(void){
     KASSERT(curproc != NULL);
     return curproc->p_id;
 #else
-    return -1;
+    return ENOSYS;
 #endif
 }
 
@@ -102,7 +102,7 @@ int sys_waitpid(pid_t pid, int *status, int options){
     (void) options;
     (void) pid;
     (void) status;
-    return -1;
+    return ENOSYS;
 #endif
 }
 
@@ -164,6 +164,7 @@ int sys_fork(struct trapframe *ctf){
     return cp->p_id;
 #else
     (void) ctf;
+    return ENOSYS;
 #endif
 }
 
@@ -172,6 +173,8 @@ int sys_execv(const char *program, char **args){
 	struct vnode *v;
 	vaddr_t entrypoint, stackptr;
 	int result;
+
+    if (program == NULL || args == NULL) return EFAULT;
 
     // safe copy of the program name from user space to kernel space
     char *kern_prog = (char *) kmalloc(PATH_MAX * sizeof(char));
@@ -187,6 +190,7 @@ int sys_execv(const char *program, char **args){
     // safe copy of the args array from user space to kernel space
     userptr_t temp_ptr;
     int argc = 0;
+    int total_bytes = 0;
     // first we have to count exactly how many arguments we have
     while(1){
         result = copyin((userptr_t)args + (argc*sizeof(userptr_t)), &temp_ptr, sizeof(userptr_t));
@@ -201,6 +205,8 @@ int sys_execv(const char *program, char **args){
         kfree(kern_prog);
         return EINVAL;
     }
+
+    total_bytes += (argc+1) * sizeof(char *);
 
     // now we can actually allocate space for the arguments and copy them
     char **kargs = (char **) kmalloc(argc * sizeof(char *));
@@ -231,6 +237,13 @@ int sys_execv(const char *program, char **args){
             kfree(kargs);
             kfree(kern_prog);
             return result;
+        }
+        total_bytes += actual_length;
+        if (total_bytes > ARG_MAX){
+            for (int j = 0; j < argc; j++) kfree(kargs[j]);
+            kfree(kargs);
+            kfree(kern_prog);
+            return E2BIG;
         }
     }
 
@@ -288,8 +301,60 @@ int sys_execv(const char *program, char **args){
     // destruction of the old as
     if (old_as != NULL) as_destroy(old_as);
 
+    // first we have to make space in the user stack enaough to insert all the arguments
+    // we will save each of these address because later we will have to insert them too as pointers in the stack
+    // because thei will be the values of the user's argv
+    userptr_t *string_addr = kmalloc(argc * sizeof(userptr_t));
+    if (string_addr == NULL){
+        for (int i = 0; i < argc; i++) kfree(kargs[i]);
+        kfree(kargs);
+        kfree(kern_prog);
+        return ENOMEM;
+    }
+    for (int i = 0; i < argc; i++){
+        int len = strlen(kargs[i])+1;
+        stackptr -= len;
+        result = copyout(kargs[i], (userptr_t) stackptr, len);
+        if (result){
+            for (int j = 0; j < argc; j++) kfree(kargs[j]);
+            kfree(kargs);
+            kfree(kern_prog);
+            kfree(string_addr);
+            return result;
+        }
+        string_addr[i] = stackptr;
+    }
+
+    stackptr -= (stackptr % 8);
+    stackptr -= 4;
+    char *null_ptr = NULL;
+    result = copyout(&null_ptr, (userptr_t) stackptr, sizeof(char *));
+    if (result){
+        for (int i = 0; i < argc; i++) kfree(kargs[i]);
+        kfree(kargs);
+        kfree(kern_prog);
+        kfree(string_addr);
+        return result;
+    }
+    for (int i = argc-1; i >= 0; i--){
+        stackptr -= 4;
+        result = copyout(&string_addr[i], (userptr_t) stackptr, sizeof(userptr_t));
+        if (result){
+            for (int j = 0; j < argc; j++) kfree(kargs[j]);
+            kfree(kargs);
+            kfree(kern_prog);
+            kfree(string_addr);
+            return result;
+        }
+    }
+
+    for (int i = 0; i < argc; i++) kfree(kargs[i]);
+    kfree(kargs);
+    kfree(kern_prog);
+    kfree(string_addr);
+
 	/* Warp to user mode. */
-	enter_new_process(0 /*argc*/, NULL /*userspace addr of argv*/,
+	enter_new_process(argc /*argc*/, (userptr_t) stackptr /*userspace addr of argv*/,
 			  NULL /*userspace addr of environment*/,
 			  stackptr, entrypoint);
 
@@ -299,5 +364,6 @@ int sys_execv(const char *program, char **args){
 #else
     (void) program;
     (void) args;
+    return ENOSYS;
 #endif
 }
