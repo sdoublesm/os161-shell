@@ -72,6 +72,15 @@ int sys___time(userptr_t user_seconds, userptr_t user_nanoseconds);
 
 #if OPT_SHELLPROJECT
 /* inserts here the syscalls of the project*/
+pid_t sys_getpid(void);
+
+void sys__exit(int exitcode);
+
+int sys_waitpid(pid_t pid, int *status, int options, int32_t *retval);
+
+int sys_fork(struct trapframe *ctf, pid_t *retval);
+
+int sys_execv(const char *program, char **args);
 #endif
 
 #endif /* _SYSCALL_H_ */

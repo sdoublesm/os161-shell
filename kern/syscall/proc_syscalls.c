@@ -48,7 +48,7 @@ void sys__exit(int exitcode){
     (void) exitcode;
 }
 
-int sys_waitpid(pid_t pid, int *status, int options){
+int sys_waitpid(pid_t pid, int *status, int options, int32_t *retval){
 #if OPT_SHELLPROJECT
     KASSERT(curproc != NULL);
 
@@ -75,8 +75,10 @@ int sys_waitpid(pid_t pid, int *status, int options){
         case 0:
             break;
         case WNOHANG:
-            if (!(p->has_exited))
+            if (!(p->has_exited)){
+                *retval = 0;
                 return 0;
+            }
             break;
         default:
             return EINVAL;
@@ -92,12 +94,13 @@ int sys_waitpid(pid_t pid, int *status, int options){
     }
     if (status != NULL){
         int err = copyout(&s, (userptr_t) status, sizeof(int));
+        *retval = p->p_id;
         if (err) return err;    // err should be automatically EFAULT if it was an invalid pointer
     }
 
     proc_destroy(p);
 
-    return pid;
+    return 0;
 #else
     (void) options;
     (void) pid;
@@ -120,7 +123,7 @@ static void call_enter_forked_process(void *tfv, unsigned long dummy){
 #endif
 }
 
-int sys_fork(struct trapframe *ctf){
+int sys_fork(struct trapframe *ctf, pid_t *retval){
 #if OPT_SHELLPROJECT
     struct trapframe *tf_child;
     struct proc *cp;
@@ -161,7 +164,8 @@ int sys_fork(struct trapframe *ctf){
         return ENOMEM;
     }
 
-    return cp->p_id;
+    *retval = cp->p_id;
+    return 0;
 #else
     (void) ctf;
     return ENOSYS;
