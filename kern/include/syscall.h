@@ -72,6 +72,7 @@ int sys___time(userptr_t user_seconds, userptr_t user_nanoseconds);
 
 #if OPT_SHELLPROJECT
 /* inserts here the syscalls of the project*/
+int sys_read(int fd, userptr_t buf, size_t size, int *retval);
 #endif
 
 #endif /* _SYSCALL_H_ */

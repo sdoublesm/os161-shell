@@ -1,0 +1,17 @@
+-g
+-Og
+-Wall
+-W
+-Wwrite-strings
+-Wmissing-prototypes
+-std=gnu99
+-mno-abicalls
+-fno-pic
+--target=mips
+-nostdinc
+-I/home/os161user/os161/src/kern/include
+-I/home/os161user/os161/src/kern/dev
+-I/home/os161user/os161/src/kern/compile/SHELLPROJECT
+-I/home/os161user/os161/src/kern/compile/SHELLPROJECT/includelinks
+-ffreestanding
+-D_KERNEL
