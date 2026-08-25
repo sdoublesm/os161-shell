@@ -1,7 +1,23 @@
+// ! For any given process, the first file descriptors (0, 1, and 2) are considered to be standard input
+// ! (stdin), standard output (stdout), and standard error (stderr). These file descriptors should start
+// ! out attached to the console device ("con:")
+
+#include <types.h>
+#include <kern/errno.h>
+#include <kern/fcntl.h>
+#include <kern/limits.h>
+#include <lib.h>
+#include <proc.h>
+#include <current.h>
+#include <addrspace.h>
+#include <vnode.h>
+#include <uio.h>
+#include <synch.h>
+#include <syscall.h>
+
 /* 
 ? How to design	
-[ int sys_read(int fd, userptr_t buf, size_t size, int *retval) ]
-
+* int sys_read(int fd, userptr_t buf, size_t size, int *retval)
 - To translate the file descriptor number to a file handle object
 - To make a uio record: userspace I/O (See kern/include/uio.h)
 - To call VOP_READ	
@@ -17,30 +33,11 @@ hints from slides:
 • Call VOP_READ(openfile->vnode, userio)
 • Openfile->offset = userio.offset;
 • Set *retval to the amount read	
-
 */
 
-#include <types.h>
-#include <kern/errno.h>
-#include <kern/fcntl.h>
-#include <kern/limits.h>
-#include <lib.h>
-#include <proc.h>
-#include <current.h>
-#include <addrspace.h>
-#include <vnode.h>
-#include <uio.h>
-#include <synch.h>
-#include <syscall.h>
-
-/*
- * sys_read
- * 
- * int sys_read(int fd, userptr_t buf, size_t size, int *retval)
- */
 int sys_read(int fd, userptr_t buf, size_t size, int *retval)
 {
-//#if OPT_SHELLPROJECT
+#if OPT_SHELLPROJECT
 	struct openfile *file;
 	struct iovec iov;
 	/** 
@@ -107,5 +104,61 @@ int sys_read(int fd, userptr_t buf, size_t size, int *retval)
 	//lock release
 	lock_release(file->lk);
 	return 0;
-//#endif
+#endif
+}
+
+
+/* 
+* int sys_write(int fd, userptr_t buf, size_t size, int *retval)
+*/
+int sys_write(int fd, userptr_t buf, size_t size, int *retval)
+{
+#if OPT_SHELLPROJECT
+	struct openfile *file;
+	struct iovec iov;
+	struct uio userio;
+	int result;
+	int amode;
+
+	if (fd < 0 || fd >= OPEN_MAX) {
+		return EBADF;
+	}
+
+	file = curproc->fileTable[fd];
+	if (file == NULL) {
+		return EBADF;
+	}
+
+	// check file mode is not readonly
+	amode = file->mode & O_ACCMODE;
+	if (amode == O_RDONLY) {
+		return EBADF;
+	}
+
+	lock_acquire(file->lk);
+
+	iov.iov_ubase = buf;
+	iov.iov_len = size;
+	
+	userio.uio_iov = &iov;
+	userio.uio_iovcnt = 1;
+	userio.uio_offset = file->offset;
+	userio.uio_resid = size;
+	userio.uio_segflg = UIO_USERSPACE;
+	userio.uio_rw = UIO_WRITE;
+	userio.uio_space = proc_getas();
+
+	// ! use VOP_WRITE function from VFS
+	result = VOP_WRITE(file->vn, &userio);
+	if (result) {
+		lock_release(file->lk);
+		return result;
+	}
+
+	file->offset = userio.uio_offset;
+	*retval = size - userio.uio_resid;
+
+	lock_release(file->lk);
+	return 0;
+#endif
 }

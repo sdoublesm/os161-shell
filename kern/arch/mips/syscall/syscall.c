@@ -110,17 +110,6 @@ syscall(struct trapframe *tf)
 						(userptr_t)(uintptr_t)tf->tf_a1);
 		break;
 
-		case SYS_write:
-		// a0 filedescriptor
-		// a1 
-		// a2
-		// stdoutput fd=1
-		if ((int)tf->tf_a0==1 && (int)tf->tf_a2==1){
-			// output to stdout
-			kprintf("%c", *(char*)(uintptr_t)tf->tf_a1);		
-		}
-		err=0;
-		break;
 	    /* Add stuff here */
 
 #if OPT_SHELLPROJECT
@@ -146,6 +135,15 @@ syscall(struct trapframe *tf)
 		case SYS_execv:
 			err = sys_execv((const char *) tf->tf_a0, (char **) tf->tf_a1);
 			break;
+
+		case SYS_read:
+			err = sys_read((int) tf->tf_a0, (userptr_t) tf->tf_a1, (size_t) tf->tf_a2, &retval);
+			break;
+
+		case SYS_write:
+			err = sys_write((int) tf->tf_a0, (userptr_t) tf->tf_a1, (size_t) tf->tf_a2, &retval);
+			break; 
+
 #endif
 
 	    default:
