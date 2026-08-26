@@ -70,7 +70,7 @@ struct child_node{
  */
 struct proc {
 	char *p_name;			/* Name of this process */
-	struct spinlock p_splock;		/* Lock for this structure */
+	struct spinlock p_lock;		/* Lock for this structure */
 	unsigned p_numthreads;		/* Number of threads in this process */
 
 	/* VM */
@@ -88,7 +88,7 @@ struct proc {
 	bool has_exited;
 	struct openfile *fileTable[OPEN_MAX];
 	struct cv *p_cv;
-	struct lock *p_lock;
+	struct lock *p_lk;
 #endif
 };
 
@@ -122,7 +122,15 @@ bool proc_find_free_slot(void);
 
 struct proc * proc_search_pid(pid_t pid);
 
+int proc_clear_children_list(struct proc *parent);
+
 int proc_insert_child_in_parent(struct proc *parent, pid_t c_pid);
+
+int proc_remove_child_from_parent(struct proc *parent, pid_t c_pid);
+
+void proc_init(struct proc *proc, const char *name);
+
+int proc_end(struct proc *proc);
 
 int proc_wait(struct proc *proc);
 

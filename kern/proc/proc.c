@@ -176,7 +176,7 @@ int proc_remove_child_from_parent(struct proc *parent, pid_t c_pid){
 #endif
 }
 
-static void proc_init(struct proc *proc, const char *name){
+void proc_init(struct proc *proc, const char *name){
 #if OPT_SHELLPROJECT
 	int i;
 	if (strcmp(name, "[kernel]") == 0){
@@ -207,14 +207,14 @@ static void proc_init(struct proc *proc, const char *name){
 	proc->parent_id = -1;
 	proc->children_list = NULL;
 	proc->p_cv = cv_create(name);
-	proc->p_lock = lock_create(name);
+	proc->p_lk = lock_create(name);
 #else
 	(void) proc;
 	(void) name;
 #endif
 }
 
-static void proc_end(struct proc *proc){
+int proc_end(struct proc *proc){
 #if OPT_SHELLPROJECT
 	int i;
 	spinlock_acquire(&processTable.lk);
@@ -223,7 +223,7 @@ static void proc_end(struct proc *proc){
 	processTable.proc[i] = NULL;
 	spinlock_release(&processTable.lk);
 	cv_destroy(proc->p_cv);
-	lock_destroy(proc->p_lock);
+	lock_destroy(proc->p_lk);
 
 	if (proc_clear_children_list(proc) == -1) return -1;
 
@@ -248,9 +248,9 @@ int proc_wait(struct proc *proc){
 	int return_status;
 	KASSERT(proc != NULL);
 	KASSERT(proc != kproc);
-	lock_acquire(proc->p_lock);
-	cv_wait(proc->p_cv, proc->p_lock);
-	lock_release(proc->p_lock);
+	lock_acquire(proc->p_lk);
+	cv_wait(proc->p_cv, proc->p_lk);
+	lock_release(proc->p_lk);
 	return_status = proc->exit_status;
 //  proc_destroy(proc);
 	return return_status;

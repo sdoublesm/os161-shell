@@ -1,10 +1,10 @@
 #include <kern/unistd.h>
 #include <kern/errno.h>
 #include <kern/wait.h>
-#include <kern/fcntl.h>
 #include <kern/syscall.h>
 
 #include <types.h>
+#include <kern/fcntl.h>
 #include <lib.h>
 #include <copyinout.h>
 #include <clock.h>
@@ -36,9 +36,9 @@ void sys__exit(int exitcode){
     p->exit_status = exitcode & 0xff;
     p->has_exited = true;
     proc_remthread(curthread);
-    lock_acquire(p->p_lock);
-    cv_signal(p->p_cv, p->p_lock);
-    lock_release(p->p_lock);
+    lock_acquire(p->p_lk);
+    cv_signal(p->p_cv, p->p_lk);
+    lock_release(p->p_lk);
 #else
     struct addrspace *as = proc_getas();
     as_destroy(as);
@@ -58,7 +58,7 @@ int sys_waitpid(pid_t pid, int *status, int options, int32_t *retval){
 
     // cannot wait on a process which is not its child
     // if so, error ECHILD
-    if (!check_child(curproc, pid)) return ECHILD;
+    if (!proc_check_child(curproc, pid)) return ECHILD;
 
     // the status pointer has to be addressed to a multiple of 4 address
     // if not (so it is unaligned), it cannot contain an integer, so error EFAULT
@@ -326,7 +326,7 @@ int sys_execv(const char *program, char **args){
             kfree(string_addr);
             return result;
         }
-        string_addr[i] = stackptr;
+        string_addr[i] = (userptr_t) stackptr;
     }
 
     stackptr -= (stackptr % 8);
