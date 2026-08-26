@@ -44,7 +44,7 @@ int sys_read(int fd, userptr_t buf, size_t size, int *retval)
 {
 #if OPT_SHELLPROJECT
 	struct openfile *file;
-	struct lock *ftlock = curproc->p_lock; // file table lock-protected
+	struct lock *ftlock = curproc->p_lk; // file table lock-protected
 	struct iovec iov;
 	/** 
 	uio (userspace i/o) usato per gestire in sicurezza il trasferimento
@@ -132,7 +132,7 @@ int sys_write(int fd, userptr_t buf, size_t size, int *retval)
 {
 #if OPT_SHELLPROJECT
 	struct openfile *file;
-	struct lock *ftlock = curproc->p_lock;
+	struct lock *ftlock = curproc->p_lk;
 	struct iovec iov;
 	struct uio userio;
 	int result;
@@ -215,7 +215,7 @@ indicate the error.
 int sys_lseek(int fd, off_t offset, int whence, int *retval){
 #if OPT_SHELLPROJECT
 	struct openfile *file = NULL;
-	struct lock *ftlock = curproc->p_lock;
+	struct lock *ftlock = curproc->p_lk;
 	off_t new_offset;
 	struct stat stats;
 	int result = 0;
