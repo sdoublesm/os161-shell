@@ -1,6 +1,8 @@
 // ! For any given process, the first file descriptors (0, 1, and 2) are considered to be standard input
 // ! (stdin), standard output (stdout), and standard error (stderr). These file descriptors should start
 // ! out attached to the console device ("con:")
+// la console e' una stream di caratteri, non ha una dimensione
+// quindi non è seekable (scorrevole). offset sempre 0
 
 #include <types.h>
 #include <kern/errno.h>
@@ -14,6 +16,9 @@
 #include <uio.h>
 #include <synch.h>
 #include <syscall.h>
+#include <kern/stat.h>
+#include <kern/seek.h>
+#include <stat.h>
 
 /* 
 ? How to design	
@@ -39,6 +44,7 @@ int sys_read(int fd, userptr_t buf, size_t size, int *retval)
 {
 #if OPT_SHELLPROJECT
 	struct openfile *file;
+	struct lock *ftlock = curproc->p_lock; // file table lock-protected
 	struct iovec iov;
 	/** 
 	uio (userspace i/o) usato per gestire in sicurezza il trasferimento
@@ -62,7 +68,10 @@ int sys_read(int fd, userptr_t buf, size_t size, int *retval)
 	}
 
 	// get the openfile item from fileTable
+	lock_acquire(ftlock);
 	file = curproc->fileTable[fd];
+	lock_release(ftlock);
+
 	if (file == NULL) {
 		return EBADF;
 	}
@@ -83,7 +92,13 @@ int sys_read(int fd, userptr_t buf, size_t size, int *retval)
 	
 	userio.uio_iov = &iov;
 	userio.uio_iovcnt = 1;
-	userio.uio_offset = file->offset;
+	
+	if (fd <= 2) {
+		userio.uio_offset = 0;
+	} else {
+		userio.uio_offset = file->offset;
+	}
+	
 	userio.uio_resid = size;
 	userio.uio_segflg = UIO_USERSPACE;
 	userio.uio_rw = UIO_READ;
@@ -96,8 +111,10 @@ int sys_read(int fd, userptr_t buf, size_t size, int *retval)
 		return result;
 	}
 
-	// offset update
-	file->offset = userio.uio_offset;
+	// offset update only for regular files
+	if (fd > 2) {
+		file->offset = userio.uio_offset;
+	}
 
 	// retval is the number of red bytes
 	*retval = size - userio.uio_resid;
@@ -115,6 +132,7 @@ int sys_write(int fd, userptr_t buf, size_t size, int *retval)
 {
 #if OPT_SHELLPROJECT
 	struct openfile *file;
+	struct lock *ftlock = curproc->p_lock;
 	struct iovec iov;
 	struct uio userio;
 	int result;
@@ -124,7 +142,9 @@ int sys_write(int fd, userptr_t buf, size_t size, int *retval)
 		return EBADF;
 	}
 
+	lock_acquire(ftlock);
 	file = curproc->fileTable[fd];
+	lock_release(ftlock);
 	if (file == NULL) {
 		return EBADF;
 	}
@@ -142,7 +162,13 @@ int sys_write(int fd, userptr_t buf, size_t size, int *retval)
 	
 	userio.uio_iov = &iov;
 	userio.uio_iovcnt = 1;
-	userio.uio_offset = file->offset;
+
+	if (fd <= 2) {
+		userio.uio_offset = 0;
+	} else {
+		userio.uio_offset = file->offset;
+	}
+
 	userio.uio_resid = size;
 	userio.uio_segflg = UIO_USERSPACE;
 	userio.uio_rw = UIO_WRITE;
@@ -155,10 +181,93 @@ int sys_write(int fd, userptr_t buf, size_t size, int *retval)
 		return result;
 	}
 
-	file->offset = userio.uio_offset;
+	if (fd > 2) {
+		file->offset = userio.uio_offset;
+	}
 	*retval = size - userio.uio_resid;
 
 	lock_release(file->lk);
 	return 0;
+#endif
+}
+
+/* 
+* int lseek(int fd, off_t offset, int whence, int *retval);
+
+lseek() repositions the file offset of the open file description
+associated with the file descriptor fd to the argument offset
+according to the directive [whence] as follows:
+
+SEEK_SET
+	The file offset is set to offset bytes.
+
+SEEK_CUR
+	The file offset is set to its current location plus offset bytes.
+
+SEEK_END
+The file offset is set to the size of the file plus offset bytes.
+
+Upon successful completion, lseek() returns the resulting offset
+location as measured in bytes from the beginning of the file.  On
+error, the value (off_t) -1 is returned and errno is set to
+indicate the error.
+*/
+int sys_lseek(int fd, off_t offset, int whence, int *retval){
+#if OPT_SHELLPROJECT
+	struct openfile *file = NULL;
+	struct lock *ftlock = curproc->p_lock;
+	off_t new_offset;
+	struct stat stats;
+	int result = 0;
+
+	if (fd < 0 || fd >= OPEN_MAX) {
+		return EBADF;
+	}
+
+	lock_acquire(ftlock);
+	file = curproc->fileTable[fd];
+	lock_release(ftlock);
+	if (file == NULL) {
+		return EBADF;
+	}
+
+	// check: file is seekable?	
+    if (fd <= 2) {
+		return ESPIPE; // fd is associated to a pipe, socket or fifo
+	}
+	// lock per modifica offset
+	lock_acquire(file->lk);
+
+	switch (whence) {
+		case SEEK_SET:
+			new_offset = offset;
+			break;
+		case SEEK_CUR:
+			new_offset = file->offset + offset;
+			break;
+		case SEEK_END:
+		// ! VOP_STAT riempie la struct stats che contiene la grandezza del file 	
+		result = VOP_STAT(file->vn, &stats); // ritorna 0 in caso di successo
+			if (result) { // error
+				lock_release(file->lk);
+				return result;
+			}
+			new_offset = stats.st_size + offset;
+			break;
+		default:
+			lock_release(file->lk);
+			return EINVAL;
+	}
+
+	// update offset
+	if (new_offset < 0) {
+		lock_release(file->lk);
+		return EINVAL;
+	}
+	file->offset = new_offset;
+	*retval = (int)new_offset;
+	lock_release(file->lk);
+
+	return 0; // success
 #endif
 }

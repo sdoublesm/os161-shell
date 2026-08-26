@@ -83,6 +83,7 @@ int sys_fork(struct trapframe *ctf, pid_t *retval);
 int sys_execv(const char *program, char **args);
 int sys_read(int fd, userptr_t buf, size_t size, int *retval);
 int sys_write(int fd, userptr_t buf, size_t size, int *retval);
+int sys_lseek(int fd, off_t offset, int whence, int *retval);
 #endif
 
 #endif /* _SYSCALL_H_ */
