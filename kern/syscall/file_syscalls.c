@@ -19,6 +19,8 @@
 #include <kern/stat.h>
 #include <kern/seek.h>
 #include <stat.h>
+#include <copyinout.h>
+#include <vfs.h>
 
 /* 
 ? How to design	
@@ -269,5 +271,82 @@ int sys_lseek(int fd, off_t offset, int whence, int *retval){
 	lock_release(file->lk);
 
 	return 0; // success
+#endif
+}
+
+/* 
+? How to design	
+* sys_open(filename, flags, mode, retfd)?
+
+creates and return the file descriptor
+
+Opens a file: create an openfile item
+Obtain vnode from vfs_open()
+Initialize offset in openfile
+File descriptor fd = Place openfile in	
+systemFiletable (Where is the table?)		
+Return the file descriptor of the openfile item.	
+*/
+
+int sys_open(userptr_t pathname, int flags, mode_t mode, int *retval)
+{
+#if OPT_SHELLPROJECT
+	struct openfile *file;
+	struct vnode *vn;
+	char filename[PATH_MAX];
+	int result;
+	size_t actual_len;
+	struct lock *ftlock = curproc->p_lk;
+	int fd;
+
+	// copy the string from user space to kernel space 
+	// necessary to avoid direct access to user memory
+	result = copyinstr(pathname, filename, sizeof(filename), &actual_len);
+	if (result) {
+		return result;
+	}
+
+	// ci serve il vnode, si occupa vfs_open di chiamare VOP_OPEN
+	result = vfs_open(filename, flags, mode, &vn);
+	if (result) {
+		return result;
+	}
+	// allochiamo struct openfile vuota
+	file = kmalloc(sizeof(struct openfile));
+	if (file == NULL) {
+		vfs_close(vn);
+		return ENOMEM;
+	}
+
+	// init openfile fields
+	file->vn = vn;
+	file->offset = 0;
+	file->mode = flags;
+	file->ref_count = 1;
+	file->lk = lock_create(filename);
+	if (file->lk == NULL) {
+		kfree(file);
+		vfs_close(vn);
+		return ENOMEM;
+	}
+
+	// insert openfile at the first free slot inside the filetable
+	lock_acquire(ftlock);
+	for (fd = 0; fd < OPEN_MAX; fd++) {
+		if (curproc->fileTable[fd] == NULL) {
+			curproc->fileTable[fd] = file;
+			break;
+		}
+	}
+	lock_release(ftlock);
+	// no free slot
+	if (fd == OPEN_MAX) {
+		lock_destroy(file->lk);
+		kfree(file);
+		vfs_close(vn);
+		return EMFILE; // per-process limit on the number of open file reached
+	}
+	*retval = fd;	
+	return 0;
 #endif
 }
