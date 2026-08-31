@@ -143,7 +143,11 @@ syscall(struct trapframe *tf)
 
 		case SYS_write:
 			err = sys_write((int) tf->tf_a0, (userptr_t) tf->tf_a1, (size_t) tf->tf_a2, &retval);
-			break; 
+			break;
+
+		case SYS_chdir:
+			err = sys_chdir((const_userptr_t) tf->tf_a0);
+			break;
 
 #endif
 
