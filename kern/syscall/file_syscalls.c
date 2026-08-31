@@ -346,7 +346,29 @@ int sys_open(userptr_t pathname, int flags, mode_t mode, int *retval)
 		vfs_close(vn);
 		return EMFILE; // per-process limit on the number of open file reached
 	}
-	*retval = fd;	
+	*retval = fd;
 	return 0;
+#endif
+}
+
+/*
+  Cambia la current working directory del processo corrente.
+  Porta la stringa del path da user space a kernel space in modo sicuro
+  Ritorna 0 in caso di successo, un codice errno altrimenti.
+ */
+int sys_chdir(const_userptr_t pathname)
+{
+#if OPT_SHELLPROJECT
+	char path[PATH_MAX];
+	int result;
+
+	// copia sicura dallo user space
+	result = copyinstr(pathname, path, sizeof(path), NULL);
+	if (result) {
+		return result;
+	}
+
+	result = vfs_chdir(path);
+	return result;
 #endif
 }
