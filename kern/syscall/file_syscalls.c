@@ -367,16 +367,27 @@ int sys_open(userptr_t pathname, int flags, mode_t mode, int32_t *retval)
 int sys_chdir(const_userptr_t pathname)
 {
 #if OPT_SHELLPROJECT
-	char path[PATH_MAX];
+	char *path;
 	int result;
 
+	if (pathname == NULL) {
+		return EFAULT;
+	}
+
+	path = kmalloc(PATH_MAX);
+	if (path == NULL) {
+		return ENOMEM;
+	}
+
 	// copia sicura dallo user space
-	result = copyinstr(pathname, path, sizeof(path), NULL);
+	result = copyinstr(pathname, path, PATH_MAX, NULL);
 	if (result) {
+		kfree(path);
 		return result;
 	}
 
 	result = vfs_chdir(path);
+	kfree(path);
 	return result;
 #endif
 }
@@ -385,7 +396,7 @@ int sys_chdir(const_userptr_t pathname)
   Scrive in buf il nome della cwd, al massimo buflen byte.
   Ritorna 0 e mette in *retval il numero di byte scritti, oppure un errno.
  */
-int sys___getcwd(userptr_t buf, size_t buflen, int *retval)
+int sys___getcwd(userptr_t buf, size_t buflen, int32_t *retval)
 {
 #if OPT_SHELLPROJECT
 	struct iovec iov;
