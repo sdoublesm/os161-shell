@@ -86,6 +86,7 @@ int sys_write(int fd, userptr_t buf, size_t size, int *retval);
 int sys_lseek(int fd, off_t offset, int whence, int *retval);
 int sys_open(userptr_t pathname, int flags, mode_t mode, int *retval);
 int sys_chdir(const_userptr_t pathname);
+int sys___getcwd(userptr_t buf, size_t buflen, int *retval);
 #endif
 
 #endif /* _SYSCALL_H_ */
