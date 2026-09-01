@@ -32,6 +32,7 @@
 
 
 #include <cdefs.h> /* for __DEAD */
+#include <types.h>
 #include <vnode.h>
 #include "opt-shellproject.h"
 

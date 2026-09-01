@@ -36,6 +36,7 @@
  * Note: curproc is defined by <current.h>.
  */
 
+#include <types.h>
 #include <spinlock.h>
 #include <limits.h>
 #include "opt-shellproject.h"

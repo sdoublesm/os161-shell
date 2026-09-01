@@ -36,10 +36,10 @@
 hints from slides:
 • Use fd to locate the openfile item from fileTable
 • Access offset from openfile
-• userio = setup a uio record	
+• userio = setup a uio record
 • Call VOP_READ(openfile->vnode, userio)
 • Openfile->offset = userio.offset;
-• Set *retval to the amount read	
+• Set *retval to the amount read
 */
 
 int sys_read(int fd, userptr_t buf, size_t size, int *retval)
