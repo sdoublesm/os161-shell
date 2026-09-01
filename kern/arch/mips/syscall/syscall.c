@@ -36,6 +36,7 @@
 #include <current.h>
 #include <syscall.h>
 #include <addrspace.h>
+#include <copyinout.h>
 
 
 /*
@@ -46,8 +47,9 @@
  *
  * The calling conventions for syscalls are as follows: Like ordinary
  * function calls, the first 4 32-bit arguments are passed in the 4
- * argument registers a0-a3. 64-bit arguments are passed in *aligned*
- * pairs of registers, that is, either a0/a1 or a2/a3. This means that
+ * argument registers a0-a3. 
+ ! 64-bit arguments are passed in *aligned* pairs of registers,
+ * that is, either a0/a1 or a2/a3. This means that
  * if the first argument is 32-bit and the second is 64-bit, a1 is
  * unused.
  *
@@ -70,11 +72,11 @@
  * must be incremented by one instruction; otherwise the exception
  * return code will restart the "syscall" instruction and the system
  * call will repeat forever.
- *
- * If you run out of registers (which happens quickly with 64-bit
- * values) further arguments must be fetched from the user-level
- * stack, starting at sp+16 to skip over the slots for the
- * registerized values, with copyin().
+ 
+ ! If you run out of registers (which happens quickly with 64-bit
+ ! values) further arguments must be fetched from the user-level
+ ! stack, starting at sp+16 to skip over the slots for the
+ ! registerized values, with copyin().
  */
 void
 syscall(struct trapframe *tf)
@@ -114,6 +116,8 @@ syscall(struct trapframe *tf)
 	    /* Add stuff here */
 
 #if OPT_SHELLPROJECT
+		// retval in v0 del trapframe (su 32bit), per questo usiamo int32_t* 
+		
 		case SYS__exit:
 			sys__exit((int) tf->tf_a0);
 			break;
@@ -144,6 +148,42 @@ syscall(struct trapframe *tf)
 		case SYS_write:
 			err = sys_write((int) tf->tf_a0, (userptr_t) tf->tf_a1, (size_t) tf->tf_a2, &retval);
 			break; 
+
+		case SYS_open:
+			err = sys_open((userptr_t) tf->tf_a0, (int) tf->tf_a1, (mode_t) tf->tf_a2, &retval);
+			break;
+
+		case SYS_close:
+			err = sys_close((int) tf->tf_a0);
+			break;
+
+		case SYS_lseek:
+		{
+			// ! off_t is a 64-bit offset
+			// MIPS registers are on 32-bit, so:
+			
+			// fd into a0 
+			
+			// then we have offset 
+			// but we need two aligned registers (comment on line 47):
+			// a1 = padding for alignment
+			
+			// a2, a3 = offset (64-bit)
+			// sp+16 = whence (from user stack)
+			
+			uint32_t whence;
+			off_t offset;
+			
+			// Combine a2 and a3 into a 64-bit offset
+			offset = ((off_t)tf->tf_a2 << 32) | tf->tf_a3;
+			
+			// Fetch whence from the user stack using copyin
+			err = copyin((userptr_t)tf->tf_sp + 16, &whence, sizeof(whence));
+			if (err == 0) {
+				err = sys_lseek((int)tf->tf_a0, offset, (int)whence, &retval);
+			}
+			break;
+		}
 
 #endif
 

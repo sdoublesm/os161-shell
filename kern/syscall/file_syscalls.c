@@ -1,9 +1,3 @@
-// ! For any given process, the first file descriptors (0, 1, and 2) are considered to be standard input
-// ! (stdin), standard output (stdout), and standard error (stderr). These file descriptors should start
-// ! out attached to the console device ("con:")
-// la console e' una stream di caratteri, non ha una dimensione
-// quindi non è seekable (scorrevole). offset sempre 0
-
 #include <types.h>
 #include <kern/errno.h>
 #include <kern/fcntl.h>
@@ -42,7 +36,7 @@ hints from slides:
 • Set *retval to the amount read
 */
 
-int sys_read(int fd, userptr_t buf, size_t size, int *retval)
+int sys_read(int fd, userptr_t buf, size_t size, int32_t *retval)
 {
 #if OPT_SHELLPROJECT
 	struct openfile *file;
@@ -61,7 +55,7 @@ int sys_read(int fd, userptr_t buf, size_t size, int *retval)
 
 	*/
 	struct uio userio;
-	int result;
+	int err;
 	int amode;
 
 	// validity check file descriptor
@@ -79,6 +73,7 @@ int sys_read(int fd, userptr_t buf, size_t size, int *retval)
 	}
 
 	// check mode is compatible with read
+	// file->mode in AND with ACCESS MODE (permessi utente)
 	amode = file->mode & O_ACCMODE;
 	if (amode == O_WRONLY) {
 		return EBADF;
@@ -95,11 +90,12 @@ int sys_read(int fd, userptr_t buf, size_t size, int *retval)
 	userio.uio_iov = &iov;
 	userio.uio_iovcnt = 1;
 	
-	if (fd <= 2) {
-		userio.uio_offset = 0;
-	} else {
-		userio.uio_offset = file->offset;
-	}
+	// don't force offset=0 for fd<=2!
+	// ad esempio per permettere il redirect dell'I/O (ls > test.txt)
+	// che fa close(0) per poi aprire test.txt in una di quelle posizioni
+	// il driver della console ignora l'offset in automatico!
+	// src/kern/dev/generic/console.c
+	userio.uio_offset = file->offset;
 	
 	userio.uio_resid = size;
 	userio.uio_segflg = UIO_USERSPACE;
@@ -107,16 +103,14 @@ int sys_read(int fd, userptr_t buf, size_t size, int *retval)
 	userio.uio_space = proc_getas();
 
 	// ! use VOP_READ function from VFS
-	result = VOP_READ(file->vn, &userio);
-	if (result) {
+	err = VOP_READ(file->vn, &userio);
+	if (err) {
 		lock_release(file->lk);
-		return result;
+		return err;
 	}
 
-	// offset update only for regular files
-	if (fd > 2) {
-		file->offset = userio.uio_offset;
-	}
+	// offset update
+	file->offset = userio.uio_offset;
 
 	// retval is the number of red bytes
 	*retval = size - userio.uio_resid;
@@ -130,14 +124,14 @@ int sys_read(int fd, userptr_t buf, size_t size, int *retval)
 /* 
 * int sys_write(int fd, userptr_t buf, size_t size, int *retval)
 */
-int sys_write(int fd, userptr_t buf, size_t size, int *retval)
+int sys_write(int fd, userptr_t buf, size_t size, int32_t *retval)
 {
 #if OPT_SHELLPROJECT
 	struct openfile *file;
 	struct lock *ftlock = curproc->p_lk;
 	struct iovec iov;
 	struct uio userio;
-	int result;
+	int err;
 	int amode;
 
 	if (fd < 0 || fd >= OPEN_MAX) {
@@ -165,11 +159,7 @@ int sys_write(int fd, userptr_t buf, size_t size, int *retval)
 	userio.uio_iov = &iov;
 	userio.uio_iovcnt = 1;
 
-	if (fd <= 2) {
-		userio.uio_offset = 0;
-	} else {
-		userio.uio_offset = file->offset;
-	}
+	userio.uio_offset = file->offset;
 
 	userio.uio_resid = size;
 	userio.uio_segflg = UIO_USERSPACE;
@@ -177,15 +167,13 @@ int sys_write(int fd, userptr_t buf, size_t size, int *retval)
 	userio.uio_space = proc_getas();
 
 	// ! use VOP_WRITE function from VFS
-	result = VOP_WRITE(file->vn, &userio);
-	if (result) {
+	err = VOP_WRITE(file->vn, &userio);
+	if (err) {
 		lock_release(file->lk);
-		return result;
+		return err;
 	}
 
-	if (fd > 2) {
-		file->offset = userio.uio_offset;
-	}
+	file->offset = userio.uio_offset;
 	*retval = size - userio.uio_resid;
 
 	lock_release(file->lk);
@@ -214,13 +202,13 @@ location as measured in bytes from the beginning of the file.  On
 error, the value (off_t) -1 is returned and errno is set to
 indicate the error.
 */
-int sys_lseek(int fd, off_t offset, int whence, int *retval){
+int sys_lseek(int fd, off_t offset, int whence, int32_t *retval){
 #if OPT_SHELLPROJECT
 	struct openfile *file = NULL;
 	struct lock *ftlock = curproc->p_lk;
 	off_t new_offset;
 	struct stat stats;
-	int result = 0;
+	int err = 0;
 
 	if (fd < 0 || fd >= OPEN_MAX) {
 		return EBADF;
@@ -234,8 +222,10 @@ int sys_lseek(int fd, off_t offset, int whence, int *retval){
 	}
 
 	// check: file is seekable?	
-    if (fd <= 2) {
-		return ESPIPE; // fd is associated to a pipe, socket or fifo
+	// es. console e' una stream di caratteri, non ha una dimensione
+	// quindi non è seekable (scorrevole)
+	if (!VOP_ISSEEKABLE(file->vn)) {
+		return ESPIPE; // not seekable
 	}
 	// lock per modifica offset
 	lock_acquire(file->lk);
@@ -249,10 +239,10 @@ int sys_lseek(int fd, off_t offset, int whence, int *retval){
 			break;
 		case SEEK_END:
 		// ! VOP_STAT riempie la struct stats che contiene la grandezza del file 	
-		result = VOP_STAT(file->vn, &stats); // ritorna 0 in caso di successo
-			if (result) { // error
+		err = VOP_STAT(file->vn, &stats); // ritorna 0 in caso di successo
+			if (err) { // error
 				lock_release(file->lk);
-				return result;
+				return err;
 			}
 			new_offset = stats.st_size + offset;
 			break;
@@ -286,35 +276,48 @@ Initialize offset in openfile
 File descriptor fd = Place openfile in	
 systemFiletable (Where is the table?)		
 Return the file descriptor of the openfile item.	
-*/
 
-int sys_open(userptr_t pathname, int flags, mode_t mode, int *retval)
+"flags" specifies how to open the file. 
+The optional mode argument provides the file permissions to use. only meaningful in Unix.
+*/
+int sys_open(userptr_t pathname, int flags, mode_t mode, int32_t *retval)
 {
 #if OPT_SHELLPROJECT
 	struct openfile *file;
 	struct vnode *vn;
-	char filename[PATH_MAX];
-	int result;
-	size_t actual_len;
+	int err;
 	struct lock *ftlock = curproc->p_lk;
 	int fd;
 
+	if (pathname==NULL){
+		return EFAULT;
+	}
+
 	// copy the string from user space to kernel space 
 	// necessary to avoid direct access to user memory
-	result = copyinstr(pathname, filename, sizeof(filename), &actual_len);
-	if (result) {
-		return result;
+	char *kpath = (char *) kmalloc(PATH_MAX*sizeof(char));
+	size_t actual_len;
+	if (kpath==NULL){
+		return ENOMEM;
+	}
+
+	err = copyinstr(pathname, kpath, PATH_MAX, &actual_len);
+	if (err) {
+		kfree(kpath);
+		return err;
 	}
 
 	// ci serve il vnode, si occupa vfs_open di chiamare VOP_OPEN
-	result = vfs_open(filename, flags, mode, &vn);
-	if (result) {
-		return result;
+	err = vfs_open(kpath, flags, mode, &vn);
+	if (err) {
+		kfree(kpath);
+		return err;
 	}
-	// allochiamo struct openfile vuota
+	// allochiamo struct openfile
 	file = kmalloc(sizeof(struct openfile));
 	if (file == NULL) {
 		vfs_close(vn);
+		kfree(kpath);
 		return ENOMEM;
 	}
 
@@ -323,7 +326,12 @@ int sys_open(userptr_t pathname, int flags, mode_t mode, int *retval)
 	file->offset = 0;
 	file->mode = flags;
 	file->ref_count = 1;
-	file->lk = lock_create(filename);
+	
+	// vfs_open might modify kpath (e.g. using strtok). To be safe, we can just use a generic lock name 
+	// or kpath. Here we use a generic name since the path is no longer pristine.
+	file->lk = lock_create("filelock");
+	kfree(kpath); // we can safely free it now
+	
 	if (file->lk == NULL) {
 		kfree(file);
 		vfs_close(vn);
@@ -347,6 +355,44 @@ int sys_open(userptr_t pathname, int flags, mode_t mode, int *retval)
 		return EMFILE; // per-process limit on the number of open file reached
 	}
 	*retval = fd;	
+	return 0;
+#endif
+}
+
+int sys_close(int fd){
+#if OPT_SHELLPROJECT
+	struct openfile *file;
+	struct lock *ftlock = curproc->p_lk;
+
+	if (fd < 0 || fd >= OPEN_MAX) {
+		return EBADF;
+	}
+
+	lock_acquire(ftlock);
+	file = curproc->fileTable[fd];
+	
+	if (file == NULL) {
+		lock_release(ftlock);
+		return EBADF;
+	}
+
+	// remove from filetable
+	curproc->fileTable[fd] = NULL;
+	lock_release(ftlock);
+
+	lock_acquire(file->lk);
+	file->ref_count--;
+	
+	if (file->ref_count > 0) {
+		// still in use by someone else -> do nothing
+		lock_release(file->lk);
+	} else {
+		// effectively close
+		lock_release(file->lk);
+		vfs_close(file->vn);
+		lock_destroy(file->lk);
+		kfree(file);
+	}
 	return 0;
 #endif
 }

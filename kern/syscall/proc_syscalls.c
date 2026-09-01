@@ -149,8 +149,19 @@ int sys_fork(struct trapframe *ctf, pid_t *retval){
     }
     memcpy(tf_child, ctf, sizeof(struct trapframe));
 
-    // For Mirko: insert here the procedure for copying the file descriptors
-
+    // -- procedure for copying the file descriptors
+    lock_acquire(curproc->p_lk);
+    for (int i = 0; i < OPEN_MAX; i++) {
+        struct openfile *file = curproc->fileTable[i];
+        if (file != NULL) {
+            lock_acquire(file->lk);
+            file->ref_count++;
+            lock_release(file->lk);
+        }
+        cp->fileTable[i] = file;
+    }
+    lock_release(curproc->p_lk);
+    // ---
     if (proc_insert_child_in_parent(curproc, cp->p_id) == -1){
         proc_destroy(cp);
         return ENOMEM;
