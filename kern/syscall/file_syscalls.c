@@ -372,3 +372,37 @@ int sys_chdir(const_userptr_t pathname)
 	return result;
 #endif
 }
+
+/*
+  Scrive in buf il nome della cwd, al massimo buflen byte.
+  Ritorna 0 e mette in *retval il numero di byte scritti, oppure un errno.
+ */
+int sys___getcwd(userptr_t buf, size_t buflen, int *retval)
+{
+#if OPT_SHELLPROJECT
+	struct iovec iov;
+	struct uio userio;
+	int result;
+
+	// uio per trasferimento verso buffer utente
+	iov.iov_ubase = buf;
+	iov.iov_len = buflen;
+
+	userio.uio_iov = &iov;
+	userio.uio_iovcnt = 1;
+	userio.uio_offset = 0;
+	userio.uio_resid = buflen;
+	userio.uio_segflg = UIO_USERSPACE;
+	userio.uio_rw = UIO_READ;
+	userio.uio_space = proc_getas();
+
+	result = vfs_getcwd(&userio);
+	if (result) {
+		return result;
+	}
+
+	// byte scritti nel buffer utente
+	*retval = buflen - userio.uio_resid;
+	return 0;
+#endif
+}
