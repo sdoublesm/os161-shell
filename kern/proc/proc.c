@@ -226,6 +226,7 @@ void proc_init(struct proc *proc, const char *name){
 	proc->children_list = NULL;
 	proc->p_cv = cv_create(name);
 	proc->p_lk = lock_create(name);
+	for (int j = 0; i < OPEN_MAX; j++) proc->fileTable[j] = NULL;
 #else
 	(void) proc;
 	(void) name;
