@@ -40,6 +40,22 @@ void sys__exit(int exitcode){
     cv_signal(p->p_cv, p->p_lk);
     lock_release(p->p_lk);
 
+    for (int i = 0; i < OPEN_MAX; i++){
+        if (curproc->fileTable[i] != NULL){
+            lock_acquire(curproc->fileTable[i]->lk);
+            curproc->fileTable[i]->ref_count--;
+
+            if (curproc->fileTable[i]->ref_count > 0) lock_release(curproc->fileTable[i]->lk);
+            else{
+                lock_release(curproc->fileTable[i]->lk);
+                vfs_close(curproc->fileTable[i]->vn);
+                lock_destroy(curproc->fileTable[i]->lk);
+                kfree(curproc->fileTable[i]);
+            }
+            curproc->fileTable[i] = NULL;
+        }
+    }
+
     struct addrspace *as = proc_setas(NULL);
     as_deactivate();
     if (as != NULL) as_destroy(as);
