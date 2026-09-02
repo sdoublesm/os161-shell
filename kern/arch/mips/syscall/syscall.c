@@ -236,6 +236,8 @@ enter_forked_process(struct trapframe *tf)
 #if OPT_SHELLPROJECT
 	struct trapframe forkedTf = *tf;
 
+	kfree(tf);
+
 	forkedTf.tf_v0 = 0;
 	forkedTf.tf_a3 = 0;
 	forkedTf.tf_epc += 4;
