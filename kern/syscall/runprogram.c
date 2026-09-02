@@ -100,6 +100,14 @@ runprogram(char *progname)
 	/* Open the file. */
 	result = vfs_open(progname, O_RDONLY, 0, &v);
 	if (result) {
+#if OPT_SHELLPROJECT
+		curproc->fileTable[0] = NULL;
+		curproc->fileTable[1] = NULL;
+		curproc->fileTable[2] = NULL;
+		lock_destroy(cfile->lk);
+		vfs_close(cfile->vn);
+		kfree(cfile);
+#endif
 		return result;
 	}
 
@@ -110,6 +118,14 @@ runprogram(char *progname)
 	as = as_create();
 	if (as == NULL) {
 		vfs_close(v);
+#if OPT_SHELLPROJECT
+		curproc->fileTable[0] = NULL;
+		curproc->fileTable[1] = NULL;
+		curproc->fileTable[2] = NULL;
+		lock_destroy(cfile->lk);
+		vfs_close(cfile->vn);
+		kfree(cfile);
+#endif
 		return ENOMEM;
 	}
 
@@ -122,6 +138,14 @@ runprogram(char *progname)
 	if (result) {
 		/* p_addrspace will go away when curproc is destroyed */
 		vfs_close(v);
+#if OPT_SHELLPROJECT
+		curproc->fileTable[0] = NULL;
+		curproc->fileTable[1] = NULL;
+		curproc->fileTable[2] = NULL;
+		lock_destroy(cfile->lk);
+		vfs_close(cfile->vn);
+		kfree(cfile);
+#endif
 		return result;
 	}
 
@@ -132,6 +156,14 @@ runprogram(char *progname)
 	result = as_define_stack(as, &stackptr);
 	if (result) {
 		/* p_addrspace will go away when curproc is destroyed */
+#if OPT_SHELLPROJECT
+		curproc->fileTable[0] = NULL;
+		curproc->fileTable[1] = NULL;
+		curproc->fileTable[2] = NULL;
+		lock_destroy(cfile->lk);
+		vfs_close(cfile->vn);
+		kfree(cfile);
+#endif
 		return result;
 	}
 
