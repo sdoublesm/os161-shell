@@ -78,6 +78,8 @@ bool proc_find_free_slot(void){
 	}
 
 	return false;
+#else
+	return false;
 #endif
 }
 
@@ -100,60 +102,70 @@ struct proc * proc_search_pid(pid_t pid){
 
 int proc_clear_children_list(struct proc *parent){
 #if OPT_SHELLPROJECT
-	struct child_node *curr = parent->children_list;
+	struct child_node *curr;
 	struct proc *child;
+	struct child_node *next;
+
+	spinlock_acquire(&parent->p_lock);
+	curr = parent->children_list;
+	parent->children_list = NULL;
+	spinlock_release(&parent->p_lock);
 
 	while (curr != NULL){
-		parent->children_list = curr->next;
+		next = curr->next;
 
 		child = proc_search_pid(curr->c_pid);
-		if (child == NULL) return -1;
-
-		child->parent_id = -1;
-		curr->next = NULL;
+		if (child != NULL){
+			spinlock_acquire(&child->p_lock);
+			child->parent_id = -1;
+			spinlock_release(&child->p_lock);
+		}
 		kfree(curr);
 
-		curr = parent->children_list;
+		curr = next;
 	}
 
 	return 0;
 #else
 	(void) parent;
+	return -1;
 #endif
 }
 
 int proc_insert_child_in_parent(struct proc *parent, pid_t c_pid){
 #if OPT_SHELLPROJECT
-	struct child_node *curr = parent->children_list;
+	struct child_node *new = (struct child_node *) kmalloc(sizeof(struct child_node));
+	if (new == NULL) return -1;
 
-	if (parent->children_list == NULL){
-		parent->children_list = (struct child_node *) kmalloc(sizeof(struct child_node));
-		if (parent->children_list == NULL) return -1;
+	new->c_pid = c_pid;
+	new->next = NULL;
 
-		parent->children_list->next = NULL;
-		parent->children_list->c_pid = c_pid;
-		return 0;
+	spinlock_acquire(&parent->p_lock);
+	if (parent->children_list == NULL)
+		parent->children_list = new;
+	else{
+		struct child_node *curr = parent->children_list;
+		while (curr->next != NULL) curr = curr->next;
+		curr->next = new;
 	}
-	
-	while (curr->next != NULL) curr = curr->next;
 
-	curr->next = (struct child_node *) kmalloc(sizeof(struct child_node));
-	if (curr->next == NULL) return -1;
-
-	curr->next->next = NULL;
-	curr->next->c_pid = c_pid;
+	spinlock_release(&parent->p_lock);
 	return 0;
 #else
 	(void) parent;
 	(void) c_pid;
+	return -1;
 #endif
 }
 
 int proc_remove_child_from_parent(struct proc *parent, pid_t c_pid){
 #if OPT_SHELLPROJECT
-	struct child_node *curr = parent->children_list;
+	struct child_node *curr;
 	struct child_node *prev = NULL;
+	struct child_node *to_free = NULL;
 
+	spinlock_acquire(&parent->p_lock);
+	curr = parent->children_list;
 	while (curr != NULL){
 		if (curr->c_pid == c_pid){
 			if (prev == NULL)
@@ -161,18 +173,24 @@ int proc_remove_child_from_parent(struct proc *parent, pid_t c_pid){
 			else
 				prev->next = curr->next;
 
-			kfree(curr);
-			return 0;
+			to_free = curr;
+			break;
 		}
 
 		prev = curr;
 		curr = curr->next;
 	}
 
+	spinlock_release(&parent->p_lock);
+	if (to_free != NULL){
+		kfree(to_free);
+		return 0;
+	}
 	return -1;
 #else
 	(void) parent;
 	(void) c_id;
+	return -1;
 #endif
 }
 
@@ -240,6 +258,7 @@ int proc_end(struct proc *proc){
 	return 0;
 #else
 	(void) proc;
+	return -1;
 #endif
 }
 
@@ -249,14 +268,13 @@ int proc_wait(struct proc *proc){
 	KASSERT(proc != NULL);
 	KASSERT(proc != kproc);
 	lock_acquire(proc->p_lk);
-	cv_wait(proc->p_cv, proc->p_lk);
-	lock_release(proc->p_lk);
+	while (!proc->has_exited) cv_wait(proc->p_cv, proc->p_lk);
 	return_status = proc->exit_status;
-//  proc_destroy(proc);
+	lock_release(proc->p_lk);
 	return return_status;
 #else
 	(void) proc;
-	return 0;
+	return -1;
 #endif
 }
 
@@ -271,6 +289,7 @@ int proc_check_child(struct proc * parent, pid_t c_pid){
 #else
 	(void) parent;
 	(void) child_pid;
+	return -1;
 #endif
 }
 

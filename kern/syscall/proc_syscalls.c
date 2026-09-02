@@ -35,10 +35,14 @@ void sys__exit(int exitcode){
     struct proc *p = curproc;
     p->exit_status = exitcode & 0xff;
     p->has_exited = true;
-    proc_remthread(curthread);
+
     lock_acquire(p->p_lk);
     cv_signal(p->p_cv, p->p_lk);
     lock_release(p->p_lk);
+
+    struct addrspace *as = proc_setas(NULL);
+    as_deactivate();
+    if (as != NULL) as_destroy(as);
 #else
     struct addrspace *as = proc_getas();
     as_destroy(as);
@@ -62,7 +66,7 @@ int sys_waitpid(pid_t pid, int *status, int options, int32_t *retval){
 
     // the status pointer has to be addressed to a multiple of 4 address
     // if not (so it is unaligned), it cannot contain an integer, so error EFAULT
-    if ((vaddr_t) status % 4 != 0) return EFAULT;
+    if (status != NULL && ((vaddr_t) status % 4 != 0)) return EFAULT;
 
     // let's find the process, if it doesn't exist, error EINVAL
     struct proc *p = proc_search_pid(pid);
@@ -88,15 +92,16 @@ int sys_waitpid(pid_t pid, int *status, int options, int32_t *retval){
     int s;
 
     // let's wait the process exit
-    // if it has already exited, return immediately
-    if (!(p->has_exited)){
-        s = proc_wait(p);
-    }
+    s = proc_wait(p);
     if (status != NULL){
+        s = _MKWAIT_EXIT(s);
         int err = copyout(&s, (userptr_t) status, sizeof(int));
-        *retval = p->p_id;
-        if (err) return err;    // err should be automatically EFAULT if it was an invalid pointer
+        if (err){
+            proc_destroy(p);
+            return err;         // err should be automatically EFAULT if it was an invalid pointer
+        };
     }
+    *retval = p->p_id;
 
     proc_destroy(p);
 
@@ -113,6 +118,8 @@ static void call_enter_forked_process(void *tfv, unsigned long dummy){
 #if OPT_SHELLPROJECT
 	struct trapframe *tf = (struct trapframe *) tfv;
 	(void) dummy;
+
+    kfree(tfv);
 
 	enter_forked_process(tf);
 
@@ -152,6 +159,7 @@ int sys_fork(struct trapframe *ctf, pid_t *retval){
     // For Mirko: insert here the procedure for copying the file descriptors
 
     if (proc_insert_child_in_parent(curproc, cp->p_id) == -1){
+        kfree(tf_child);
         proc_destroy(cp);
         return ENOMEM;
     }
@@ -159,6 +167,7 @@ int sys_fork(struct trapframe *ctf, pid_t *retval){
 
     result = thread_fork(curthread->t_name, cp, call_enter_forked_process, (void *) tf_child, (unsigned long) 0);
     if (result){
+        proc_remove_child_from_parent(curproc, cp->p_id);
         proc_destroy(cp);
         kfree(tf_child);
         return ENOMEM;
@@ -213,51 +222,51 @@ int sys_execv(const char *program, char **args){
     total_bytes += (argc+1) * sizeof(char *);
 
     // now we can actually allocate space for the arguments and copy them
-    char **kargs = (char **) kmalloc(argc * sizeof(char *));
-    if (kargs == NULL){
+    char *arg_buffer = (char *) kmalloc(ARG_MAX);
+    if (arg_buffer == NULL){
         kfree(kern_prog);
         return ENOMEM;
     }
+
+    size_t *arg_offsets = (size_t *) kmalloc(argc * sizeof(size_t));
+    if (arg_offsets == NULL){
+        kfree(arg_buffer);
+        kfree(kern_prog);
+        return ENOMEM;
+    }
+    size_t total_offset = 0;
+
     for (int i = 0; i < argc; i++){
-        kargs[i] = (char *) kmalloc(128 * sizeof(char));
-        if (kargs[i] == NULL){
-            for (int j = i-1; j >= 0; j--) kfree(kargs[j]);
-            kfree(kargs);
-            kfree(kern_prog);
-            return ENOMEM;
-        }
         userptr_t str_ptr;
-        result = copyin((userptr_t)args + (i*sizeof(userptr_t)), &str_ptr, sizeof(userptr_t));
+        result = copyin((userptr_t) args + (i * sizeof(userptr_t)), &str_ptr, sizeof(userptr_t));
         if (result){
-            for (int j = i; j >= 0; j--) kfree(kargs[j]);
-            kfree(kargs);
+            kfree(arg_offsets);
+            kfree(arg_buffer);
             kfree(kern_prog);
             return result;
         }
+
         size_t actual_length;
-        result = copyinstr(str_ptr, kargs[i], 128, &actual_length);
+        result = copyinstr(str_ptr, arg_buffer + total_offset, ARG_MAX - total_offset, &actual_length);
         if (result){
-            for (int j = i; j >= 0; j--) kfree(kargs[j]);
-            kfree(kargs);
+            kfree(arg_offsets);
+            kfree(arg_buffer);
             kfree(kern_prog);
+            if (result == ENAMETOOLONG) return E2BIG;
             return result;
         }
-        total_bytes += actual_length;
-        if (total_bytes > ARG_MAX){
-            for (int j = 0; j < argc; j++) kfree(kargs[j]);
-            kfree(kargs);
-            kfree(kern_prog);
-            return E2BIG;
-        }
+        
+        arg_offsets[i] = total_offset;
+        total_offset += actual_length;
     }
 
 	/* Open the file. */
 	result = vfs_open(kern_prog, O_RDONLY, 0, &v);
 	if (result) {
-        for (int i = 0; i < argc; i++) kfree(kargs[i]);
-        kfree(kargs);
+        kfree(arg_offsets);
+        kfree(arg_buffer);
         kfree(kern_prog);
-		return result;
+        return result;
 	}
 
     struct addrspace *old_as;
@@ -267,8 +276,8 @@ int sys_execv(const char *program, char **args){
     new_as = as_create();
     if (new_as == NULL){
         vfs_close(v);
-        for (int i = 0; i < argc; i++) kfree(kargs[i]);
-        kfree(kargs);
+        kfree(arg_offsets);
+        kfree(arg_buffer);
         kfree(kern_prog);
         return ENOMEM;
     }
@@ -285,8 +294,8 @@ int sys_execv(const char *program, char **args){
 	if (result) {
 		/* p_addrspace will go away when curproc is destroyed */
 		vfs_close(v);
-        for (int i = 0; i < argc; i++) kfree(kargs[i]);
-        kfree(kargs);
+        kfree(arg_offsets);
+        kfree(arg_buffer);
         kfree(kern_prog);
 		return result;
 	}
@@ -296,8 +305,8 @@ int sys_execv(const char *program, char **args){
     // we create the user's stack in the new as
     result = as_define_stack(new_as, &stackptr);
     if (result) {
-        for (int i = 0; i < argc; i++) kfree(kargs[i]);
-        kfree(kargs);
+        kfree(arg_offsets);
+        kfree(arg_buffer);
         kfree(kern_prog);
 		return result;
 	}
@@ -305,23 +314,24 @@ int sys_execv(const char *program, char **args){
     // destruction of the old as
     if (old_as != NULL) as_destroy(old_as);
 
-    // first we have to make space in the user stack enaough to insert all the arguments
+    // first we have to make space in the user stack enough to insert all the arguments
     // we will save each of these address because later we will have to insert them too as pointers in the stack
     // because thei will be the values of the user's argv
     userptr_t *string_addr = kmalloc(argc * sizeof(userptr_t));
     if (string_addr == NULL){
-        for (int i = 0; i < argc; i++) kfree(kargs[i]);
-        kfree(kargs);
+        kfree(arg_offsets);
+        kfree(arg_buffer);
         kfree(kern_prog);
         return ENOMEM;
     }
     for (int i = 0; i < argc; i++){
-        int len = strlen(kargs[i])+1;
+        char *curr_str = arg_buffer + arg_offsets[i];
+        int len = strlen(curr_str) + 1;
         stackptr -= len;
-        result = copyout(kargs[i], (userptr_t) stackptr, len);
+        result = copyout(curr_str, (userptr_t) stackptr, len);
         if (result){
-            for (int j = 0; j < argc; j++) kfree(kargs[j]);
-            kfree(kargs);
+            kfree(arg_offsets);
+            kfree(arg_buffer);
             kfree(kern_prog);
             kfree(string_addr);
             return result;
@@ -330,12 +340,15 @@ int sys_execv(const char *program, char **args){
     }
 
     stackptr -= (stackptr % 8);
-    stackptr -= 4;
+    int pointer_array_size = (argc + 1) * sizeof(userptr_t);
+    if ((stackptr - pointer_array_size) % 8 != 0) stackptr -= 4;
+
     char *null_ptr = NULL;
+    stackptr -= sizeof(userptr_t);
     result = copyout(&null_ptr, (userptr_t) stackptr, sizeof(char *));
     if (result){
-        for (int i = 0; i < argc; i++) kfree(kargs[i]);
-        kfree(kargs);
+        kfree(arg_offsets);
+        kfree(arg_buffer);
         kfree(kern_prog);
         kfree(string_addr);
         return result;
@@ -344,16 +357,16 @@ int sys_execv(const char *program, char **args){
         stackptr -= 4;
         result = copyout(&string_addr[i], (userptr_t) stackptr, sizeof(userptr_t));
         if (result){
-            for (int j = 0; j < argc; j++) kfree(kargs[j]);
-            kfree(kargs);
+            kfree(arg_offsets);
+            kfree(arg_buffer);
             kfree(kern_prog);
             kfree(string_addr);
             return result;
         }
     }
 
-    for (int i = 0; i < argc; i++) kfree(kargs[i]);
-    kfree(kargs);
+    kfree(arg_offsets);
+    kfree(arg_buffer);
     kfree(kern_prog);
     kfree(string_addr);
 
