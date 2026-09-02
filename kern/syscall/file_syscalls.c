@@ -426,6 +426,29 @@ int sys___getcwd(userptr_t buf, size_t buflen, int32_t *retval)
 #endif
 }
 
+#if OPT_SHELLPROJECT
+/*
+  release a reference to an openfile: drop ref_count and, when it reaches 0,
+  actually close the vnode and free the structure.
+ */
+static void openfile_decref(struct openfile *file)
+{
+	lock_acquire(file->lk);
+	file->ref_count--;
+
+	if (file->ref_count > 0) {
+		// still in use by someone else -> do nothing
+		lock_release(file->lk);
+	} else {
+		// effectively close
+		lock_release(file->lk);
+		vfs_close(file->vn);
+		lock_destroy(file->lk);
+		kfree(file);
+	}
+}
+#endif
+
 int sys_close(int fd){
 #if OPT_SHELLPROJECT
 	struct openfile *file;
@@ -447,19 +470,68 @@ int sys_close(int fd){
 	curproc->fileTable[fd] = NULL;
 	lock_release(ftlock);
 
-	lock_acquire(file->lk);
-	file->ref_count--;
-	
-	if (file->ref_count > 0) {
-		// still in use by someone else -> do nothing
-		lock_release(file->lk);
-	} else {
-		// effectively close
-		lock_release(file->lk);
-		vfs_close(file->vn);
-		lock_destroy(file->lk);
-		kfree(file);
+	openfile_decref(file);
+	return 0;
+#endif
+}
+
+/*
+  dup2(oldfd, newfd): fa in modo che newfd si riferisca allo stesso openfile
+  di oldfd (stesso seek pointer). Se newfd era gia' aperto viene chiuso.
+  Ritorna newfd in *retval.
+ */
+int sys_dup2(int oldfd, int newfd, int32_t *retval){
+#if OPT_SHELLPROJECT
+	struct openfile *file;
+	struct openfile *to_close;
+	struct lock *ftlock = curproc->p_lk;
+
+	// entrambi gli fd devono stare nel range valido
+	if (oldfd < 0 || oldfd >= OPEN_MAX ||
+	    newfd < 0 || newfd >= OPEN_MAX) {
+		return EBADF;
 	}
+
+	lock_acquire(ftlock);
+
+	file = curproc->fileTable[oldfd];
+	if (file == NULL) {
+		lock_release(ftlock);
+		return EBADF;
+	}
+
+	// dup2 di un fd su se stesso
+	if (oldfd == newfd) {
+		lock_release(ftlock);
+		*retval = newfd;
+		return 0;
+	}
+
+	to_close = curproc->fileTable[newfd];
+
+	// oldfd e newfd condividono gia' lo stesso openfile
+	if (file == to_close) {
+		lock_release(ftlock);
+		*retval = newfd;
+		return 0;
+	}
+
+	// clona: aggiungo il riferimento PRIMA di installarlo in newfd, cosi'
+	// newfd non e' mai visibile in uno stato "chiuso ma non riassegnato"
+	lock_acquire(file->lk);
+	file->ref_count++;
+	lock_release(file->lk);
+
+	curproc->fileTable[newfd] = file;
+
+	lock_release(ftlock);
+
+	// se newfd era aperto su un altro file, ora lo chiudo
+	if (to_close != NULL) {
+		openfile_decref(to_close);
+	}
+
+	*retval = newfd;
 	return 0;
 #endif
 }
