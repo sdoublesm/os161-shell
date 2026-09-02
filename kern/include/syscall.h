@@ -32,6 +32,7 @@
 
 
 #include <cdefs.h> /* for __DEAD */
+#include <types.h>
 #include <vnode.h>
 #include "opt-shellproject.h"
 
@@ -72,6 +73,23 @@ int sys___time(userptr_t user_seconds, userptr_t user_nanoseconds);
 
 #if OPT_SHELLPROJECT
 /* inserts here the syscalls of the project*/
+pid_t sys_getpid(void);
+
+void sys__exit(int exitcode);
+
+int sys_waitpid(pid_t pid, int *status, int options, int32_t *retval);
+
+int sys_fork(struct trapframe *ctf, pid_t *retval);
+
+int sys_execv(const char *program, char **args);
+int sys_read(int fd, userptr_t buf, size_t size, int32_t *retval);
+int sys_write(int fd, userptr_t buf, size_t size, int32_t *retval);
+int sys_lseek(int fd, off_t offset, int whence, int32_t *retval);
+int sys_open(userptr_t pathname, int flags, mode_t mode, int32_t *retval);
+int sys_close(int fd);
+int sys_dup2(int oldfd, int newfd, int32_t *retval);
+int sys_chdir(const_userptr_t pathname);
+int sys___getcwd(userptr_t buf, size_t buflen, int32_t *retval);
 #endif
 
 #endif /* _SYSCALL_H_ */

@@ -33,7 +33,8 @@
  * that execv() needs to do more than runprogram() does.
  */
 
-#include <types.h>
+ #include <types.h>
+#include "synch.h"
 #include <kern/errno.h>
 #include <kern/fcntl.h>
 #include <lib.h>
@@ -59,9 +60,54 @@ runprogram(char *progname)
 	vaddr_t entrypoint, stackptr;
 	int result;
 
+#if OPT_SHELLPROJECT
+	// ! For any given process, the first file descriptors (0, 1, and 2) are considered to be standard input
+	// ! (stdin), standard output (stdout), and standard error (stderr). These file descriptors should start
+	// ! out attached to the console device ("con:") 
+	char cpath[] = "con:";
+	struct vnode *cvnode;
+	struct openfile *cfile;
+
+	// apertura device console 
+	result = vfs_open(cpath, O_RDWR, 0, &cvnode);
+	if (result) {
+		return result;
+	}
+
+	cfile = kmalloc(sizeof(struct openfile));
+	if (cfile == NULL) {
+		vfs_close(cvnode);
+		return ENOMEM;
+	}
+
+	cfile->vn = cvnode;
+	cfile->offset = 0;
+	cfile->mode = O_RDWR;
+	cfile->ref_count = 3; // stdin, stout, stderr
+	cfile->lk = lock_create("console");
+	if (cfile->lk == NULL) {
+		kfree(cfile);
+		vfs_close(cvnode);
+		return ENOMEM;
+	}
+	
+	// agli indici 0, 1 e 2 della file table ci va console:
+	curproc->fileTable[0] = cfile;
+	curproc->fileTable[1] = cfile;
+	curproc->fileTable[2] = cfile;
+#endif
+
 	/* Open the file. */
 	result = vfs_open(progname, O_RDONLY, 0, &v);
 	if (result) {
+#if OPT_SHELLPROJECT
+		curproc->fileTable[0] = NULL;
+		curproc->fileTable[1] = NULL;
+		curproc->fileTable[2] = NULL;
+		lock_destroy(cfile->lk);
+		vfs_close(cfile->vn);
+		kfree(cfile);
+#endif
 		return result;
 	}
 
@@ -72,6 +118,14 @@ runprogram(char *progname)
 	as = as_create();
 	if (as == NULL) {
 		vfs_close(v);
+#if OPT_SHELLPROJECT
+		curproc->fileTable[0] = NULL;
+		curproc->fileTable[1] = NULL;
+		curproc->fileTable[2] = NULL;
+		lock_destroy(cfile->lk);
+		vfs_close(cfile->vn);
+		kfree(cfile);
+#endif
 		return ENOMEM;
 	}
 
@@ -84,6 +138,14 @@ runprogram(char *progname)
 	if (result) {
 		/* p_addrspace will go away when curproc is destroyed */
 		vfs_close(v);
+#if OPT_SHELLPROJECT
+		curproc->fileTable[0] = NULL;
+		curproc->fileTable[1] = NULL;
+		curproc->fileTable[2] = NULL;
+		lock_destroy(cfile->lk);
+		vfs_close(cfile->vn);
+		kfree(cfile);
+#endif
 		return result;
 	}
 
@@ -94,6 +156,14 @@ runprogram(char *progname)
 	result = as_define_stack(as, &stackptr);
 	if (result) {
 		/* p_addrspace will go away when curproc is destroyed */
+#if OPT_SHELLPROJECT
+		curproc->fileTable[0] = NULL;
+		curproc->fileTable[1] = NULL;
+		curproc->fileTable[2] = NULL;
+		lock_destroy(cfile->lk);
+		vfs_close(cfile->vn);
+		kfree(cfile);
+#endif
 		return result;
 	}
 

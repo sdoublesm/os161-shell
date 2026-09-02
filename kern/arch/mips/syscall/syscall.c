@@ -35,6 +35,8 @@
 #include <thread.h>
 #include <current.h>
 #include <syscall.h>
+#include <addrspace.h>
+#include <copyinout.h>
 
 
 /*
@@ -45,8 +47,9 @@
  *
  * The calling conventions for syscalls are as follows: Like ordinary
  * function calls, the first 4 32-bit arguments are passed in the 4
- * argument registers a0-a3. 64-bit arguments are passed in *aligned*
- * pairs of registers, that is, either a0/a1 or a2/a3. This means that
+ * argument registers a0-a3. 
+ ! 64-bit arguments are passed in *aligned* pairs of registers,
+ * that is, either a0/a1 or a2/a3. This means that
  * if the first argument is 32-bit and the second is 64-bit, a1 is
  * unused.
  *
@@ -69,11 +72,11 @@
  * must be incremented by one instruction; otherwise the exception
  * return code will restart the "syscall" instruction and the system
  * call will repeat forever.
- *
- * If you run out of registers (which happens quickly with 64-bit
- * values) further arguments must be fetched from the user-level
- * stack, starting at sp+16 to skip over the slots for the
- * registerized values, with copyin().
+ 
+ ! If you run out of registers (which happens quickly with 64-bit
+ ! values) further arguments must be fetched from the user-level
+ ! stack, starting at sp+16 to skip over the slots for the
+ ! registerized values, with copyin().
  */
 void
 syscall(struct trapframe *tf)
@@ -98,6 +101,7 @@ syscall(struct trapframe *tf)
 	 */
 
 	retval = 0;
+	err = 0;
 
 	switch (callno) {
 	    case SYS_reboot:
@@ -109,18 +113,91 @@ syscall(struct trapframe *tf)
 						(userptr_t)(uintptr_t)tf->tf_a1);
 		break;
 
-		case SYS_write:
-		// a0 filedescriptor
-		// a1 
-		// a2
-		// stdoutput fd=1
-		if ((int)tf->tf_a0==1 && (int)tf->tf_a2==1){
-			// output to stdout
-			kprintf("%c", *(char*)(uintptr_t)tf->tf_a1);		
-		}
-		err=0;
-		break;
 	    /* Add stuff here */
+
+#if OPT_SHELLPROJECT
+		// retval in v0 del trapframe (su 32bit), per questo usiamo int32_t* 
+		
+		case SYS__exit:
+			sys__exit((int) tf->tf_a0);
+			break;
+
+		case SYS_waitpid:
+			err = sys_waitpid((pid_t) tf->tf_a0,
+					(int *) tf->tf_a1,
+					(int) tf->tf_a2,
+					(pid_t *) &retval);
+			break;
+
+		case SYS_getpid:
+			retval = sys_getpid();
+			break;
+
+		case SYS_fork:
+			err = sys_fork(tf, &retval);
+			break;
+
+		case SYS_execv:
+			err = sys_execv((const char *) tf->tf_a0, (char **) tf->tf_a1);
+			break;
+
+		case SYS_read:
+			err = sys_read((int) tf->tf_a0, (userptr_t) tf->tf_a1, (size_t) tf->tf_a2, &retval);
+			break;
+
+		case SYS_write:
+			err = sys_write((int) tf->tf_a0, (userptr_t) tf->tf_a1, (size_t) tf->tf_a2, &retval);
+			break;
+
+		case SYS_chdir:
+			err = sys_chdir((const_userptr_t) tf->tf_a0);
+			break;
+
+		case SYS___getcwd:
+			err = sys___getcwd((userptr_t) tf->tf_a0, (size_t) tf->tf_a1, &retval);
+			break;
+
+		case SYS_open:
+			err = sys_open((userptr_t) tf->tf_a0, (int) tf->tf_a1, (mode_t) tf->tf_a2, &retval);
+			break;
+
+		case SYS_close:
+			err = sys_close((int) tf->tf_a0);
+			break;
+
+		case SYS_dup2:
+			err = sys_dup2((int) tf->tf_a0, (int) tf->tf_a1, &retval);
+			break;
+
+		case SYS_lseek:
+		{
+			// ! off_t is a 64-bit offset
+			// MIPS registers are on 32-bit, so:
+			
+			// fd into a0 
+			
+			// then we have offset 
+			// but we need two aligned registers (comment on line 47):
+			// a1 = padding for alignment
+			
+			// a2, a3 = offset (64-bit)
+			// sp+16 = whence (from user stack)
+			
+			uint32_t whence;
+			off_t offset;
+			
+			// Combine a2 and a3 into a 64-bit offset
+			offset = ((off_t)tf->tf_a2 << 32) | tf->tf_a3;
+			
+			// Fetch whence from the user stack using copyin
+			err = copyin((userptr_t)tf->tf_sp + 16, &whence, sizeof(whence));
+			if (err == 0) {
+				err = sys_lseek((int)tf->tf_a0, offset, (int)whence, &retval);
+			}
+			break;
+		}
+
+#endif
 
 	    default:
 		kprintf("Unknown syscall %d\n", callno);
@@ -168,5 +245,19 @@ syscall(struct trapframe *tf)
 void
 enter_forked_process(struct trapframe *tf)
 {
+#if OPT_SHELLPROJECT
+	struct trapframe forkedTf = *tf;
+
+	kfree(tf);
+
+	forkedTf.tf_v0 = 0;
+	forkedTf.tf_a3 = 0;
+	forkedTf.tf_epc += 4;
+
+	as_activate();
+
+	mips_usermode(&forkedTf);
+#else
 	(void)tf;
+#endif
 }
