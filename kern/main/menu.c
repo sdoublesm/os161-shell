@@ -43,8 +43,10 @@
 #include <sfs.h>
 #include <syscall.h>
 #include <test.h>
+#include <current.h>
 #include "opt-sfs.h"
 #include "opt-net.h"
+#include "opt-shellproject.h"
 
 /*
  * In-kernel menu and command dispatcher.
@@ -123,15 +125,28 @@ common_prog(int nargs, char **args)
 		return ENOMEM;
 	}
 
+#if OPT_SHELLPROJECT
+	proc_insert_child_in_parent(curproc, proc->p_id);
+	proc->parent_id = curproc->p_id;
+#endif
+
 	result = thread_fork(args[0] /* thread name */,
 			proc /* new process */,
 			cmd_progthread /* thread function */,
 			args /* thread arg */, nargs /* thread arg */);
 	if (result) {
 		kprintf("thread_fork failed: %s\n", strerror(result));
+#if OPT_SHELLPROJECT
+		proc_remove_child_from_parent(curproc, proc->p_id);
+#endif
 		proc_destroy(proc);
 		return result;
 	}
+
+#if OPT_SHELLPROJECT
+	proc_wait(proc);
+	proc_destroy(proc);
+#endif
 
 	/*
 	 * The new process will be destroyed when the program exits...

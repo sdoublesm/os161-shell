@@ -226,7 +226,7 @@ void proc_init(struct proc *proc, const char *name){
 	proc->children_list = NULL;
 	proc->p_cv = cv_create(name);
 	proc->p_lk = lock_create(name);
-	for (int j = 0; i < OPEN_MAX; j++) proc->fileTable[j] = NULL;
+	for (int j = 0; j < OPEN_MAX; j++) proc->fileTable[j] = NULL;
 #else
 	(void) proc;
 	(void) name;
@@ -272,6 +272,15 @@ int proc_wait(struct proc *proc){
 	while (!proc->has_exited) cv_wait(proc->p_cv, proc->p_lk);
 	return_status = proc->exit_status;
 	lock_release(proc->p_lk);
+
+	bool threads_left = true;
+	while (threads_left){
+		spinlock_acquire(&proc->p_lock);
+		if (proc->p_numthreads == 0) threads_left = false;
+		spinlock_release(&proc->p_lock);
+		if (threads_left) thread_yield();
+	}
+	
 	return return_status;
 #else
 	(void) proc;

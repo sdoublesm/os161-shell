@@ -202,7 +202,7 @@ location as measured in bytes from the beginning of the file.  On
 error, the value (off_t) -1 is returned and errno is set to
 indicate the error.
 */
-int sys_lseek(int fd, off_t offset, int whence, int32_t *retval){
+int sys_lseek(int fd, off_t offset, int whence, int64_t *retval){
 #if OPT_SHELLPROJECT
 	struct openfile *file = NULL;
 	struct lock *ftlock = curproc->p_lk;
@@ -257,7 +257,7 @@ int sys_lseek(int fd, off_t offset, int whence, int32_t *retval){
 		return EINVAL;
 	}
 	file->offset = new_offset;
-	*retval = (int)new_offset;
+	*retval = new_offset;
 	lock_release(file->lk);
 
 	return 0; // success

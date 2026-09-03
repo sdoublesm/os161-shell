@@ -33,12 +33,6 @@ pid_t sys_getpid(void){
 void sys__exit(int exitcode){
 #if OPT_SHELLPROJECT
     struct proc *p = curproc;
-    p->exit_status = exitcode & 0xff;
-    p->has_exited = true;
-
-    lock_acquire(p->p_lk);
-    cv_signal(p->p_cv, p->p_lk);
-    lock_release(p->p_lk);
 
     for (int i = 0; i < OPEN_MAX; i++){
         if (curproc->fileTable[i] != NULL){
@@ -59,6 +53,16 @@ void sys__exit(int exitcode){
     struct addrspace *as = proc_setas(NULL);
     as_deactivate();
     if (as != NULL) as_destroy(as);
+
+    p->exit_status = exitcode & 0xff;
+    p->has_exited = true;
+
+//    proc_remthread(curthread);
+
+    lock_acquire(p->p_lk);
+    cv_signal(p->p_cv, p->p_lk);
+    lock_release(p->p_lk);
+
 #else
     struct addrspace *as = proc_getas();
     as_destroy(as);
@@ -134,8 +138,6 @@ static void call_enter_forked_process(void *tfv, unsigned long dummy){
 #if OPT_SHELLPROJECT
 	struct trapframe *tf = (struct trapframe *) tfv;
 	(void) dummy;
-
-    kfree(tfv);
 
 	enter_forked_process(tf);
 
@@ -249,7 +251,7 @@ int sys_execv(const char *program, char **args){
     total_bytes += (argc+1) * sizeof(char *);
 
     // now we can actually allocate space for the arguments and copy them
-    char *arg_buffer = (char *) kmalloc(ARG_MAX);
+    char *arg_buffer = (char *) kmalloc(4096);
     if (arg_buffer == NULL){
         kfree(kern_prog);
         return ENOMEM;
@@ -274,7 +276,7 @@ int sys_execv(const char *program, char **args){
         }
 
         size_t actual_length;
-        result = copyinstr(str_ptr, arg_buffer + total_offset, ARG_MAX - total_offset, &actual_length);
+        result = copyinstr(str_ptr, arg_buffer + total_offset, 4096 - total_offset, &actual_length);
         if (result){
             kfree(arg_offsets);
             kfree(arg_buffer);
@@ -320,6 +322,9 @@ int sys_execv(const char *program, char **args){
 	result = load_elf(v, &entrypoint);
 	if (result) {
 		/* p_addrspace will go away when curproc is destroyed */
+        proc_setas(old_as);
+        as_activate();
+        as_destroy(new_as);
 		vfs_close(v);
         kfree(arg_offsets);
         kfree(arg_buffer);
@@ -332,20 +337,23 @@ int sys_execv(const char *program, char **args){
     // we create the user's stack in the new as
     result = as_define_stack(new_as, &stackptr);
     if (result) {
+        proc_setas(old_as);
+        as_activate();
+        as_destroy(new_as);
         kfree(arg_offsets);
         kfree(arg_buffer);
         kfree(kern_prog);
 		return result;
 	}
 
-    // destruction of the old as
-    if (old_as != NULL) as_destroy(old_as);
-
     // first we have to make space in the user stack enough to insert all the arguments
     // we will save each of these address because later we will have to insert them too as pointers in the stack
     // because thei will be the values of the user's argv
     userptr_t *string_addr = kmalloc(argc * sizeof(userptr_t));
     if (string_addr == NULL){
+        proc_setas(old_as);
+        as_activate();
+        as_destroy(new_as);
         kfree(arg_offsets);
         kfree(arg_buffer);
         kfree(kern_prog);
@@ -357,6 +365,9 @@ int sys_execv(const char *program, char **args){
         stackptr -= len;
         result = copyout(curr_str, (userptr_t) stackptr, len);
         if (result){
+            proc_setas(old_as);
+            as_activate();
+            as_destroy(new_as);
             kfree(arg_offsets);
             kfree(arg_buffer);
             kfree(kern_prog);
@@ -374,6 +385,9 @@ int sys_execv(const char *program, char **args){
     stackptr -= sizeof(userptr_t);
     result = copyout(&null_ptr, (userptr_t) stackptr, sizeof(char *));
     if (result){
+        proc_setas(old_as);
+        as_activate();
+        as_destroy(new_as);
         kfree(arg_offsets);
         kfree(arg_buffer);
         kfree(kern_prog);
@@ -384,6 +398,9 @@ int sys_execv(const char *program, char **args){
         stackptr -= 4;
         result = copyout(&string_addr[i], (userptr_t) stackptr, sizeof(userptr_t));
         if (result){
+            proc_setas(old_as);
+            as_activate();
+            as_destroy(new_as);
             kfree(arg_offsets);
             kfree(arg_buffer);
             kfree(kern_prog);
@@ -396,6 +413,9 @@ int sys_execv(const char *program, char **args){
     kfree(arg_buffer);
     kfree(kern_prog);
     kfree(string_addr);
+
+    // destruction of the old as
+    if (old_as != NULL) as_destroy(old_as);
 
 	/* Warp to user mode. */
 	enter_new_process(argc /*argc*/, (userptr_t) stackptr /*userspace addr of argv*/,
