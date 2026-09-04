@@ -91,7 +91,7 @@ struct proc * proc_search_pid(pid_t pid){
 
 	p = processTable.proc[pid];
 
-	if (p->p_id != pid) return NULL;
+	if (p == NULL || p->p_id != pid) return NULL;
 	
 	return p;
 #else

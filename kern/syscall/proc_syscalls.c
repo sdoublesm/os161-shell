@@ -117,7 +117,6 @@ int sys_waitpid(pid_t pid, int *status, int options, int32_t *retval){
         s = _MKWAIT_EXIT(s);
         int err = copyout(&s, (userptr_t) status, sizeof(int));
         if (err){
-            proc_destroy(p);
             return err;         // err should be automatically EFAULT if it was an invalid pointer
         };
     }
