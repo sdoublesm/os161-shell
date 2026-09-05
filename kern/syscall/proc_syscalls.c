@@ -129,6 +129,7 @@ int sys_waitpid(pid_t pid, int *status, int options, int32_t *retval){
     (void) options;
     (void) pid;
     (void) status;
+	(void) retval;
     return ENOSYS;
 #endif
 }
@@ -205,6 +206,7 @@ int sys_fork(struct trapframe *ctf, pid_t *retval){
     return 0;
 #else
     (void) ctf;
+	(void) retval;
     return ENOSYS;
 #endif
 }
