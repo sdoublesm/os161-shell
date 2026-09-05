@@ -117,7 +117,6 @@ int sys_waitpid(pid_t pid, int *status, int options, int32_t *retval){
         s = _MKWAIT_EXIT(s);
         int err = copyout(&s, (userptr_t) status, sizeof(int));
         if (err){
-            proc_destroy(p);
             return err;         // err should be automatically EFAULT if it was an invalid pointer
         };
     }
@@ -130,6 +129,7 @@ int sys_waitpid(pid_t pid, int *status, int options, int32_t *retval){
     (void) options;
     (void) pid;
     (void) status;
+	(void) retval;
     return ENOSYS;
 #endif
 }
@@ -206,6 +206,7 @@ int sys_fork(struct trapframe *ctf, pid_t *retval){
     return 0;
 #else
     (void) ctf;
+	(void) retval;
     return ENOSYS;
 #endif
 }
