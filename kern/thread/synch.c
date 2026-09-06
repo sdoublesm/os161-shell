@@ -154,9 +154,18 @@ lock_create(const char *name)
                 return NULL;
         }
 
-	HANGMAN_LOCKABLEINIT(&lock->lk_hangman, lock->lk_name);
-
         // add stuff here as needed
+
+#if OPT_SHELLPROJECT
+	lock->lk_wchan = wchan_create(lock->lk_name);
+	if (lock->lk_wchan == NULL) {
+	  kfree(lock->lk_name);
+	  kfree(lock);
+	  return NULL;
+	}
+	lock->lk_owner = NULL;
+	spinlock_init(&lock->lk_lock);
+#endif
 
         return lock;
 }
@@ -167,6 +176,11 @@ lock_destroy(struct lock *lock)
         KASSERT(lock != NULL);
 
         // add stuff here as needed
+
+#if OPT_SHELLPROJECT
+	spinlock_cleanup(&lock->lk_lock);
+	wchan_destroy(lock->lk_wchan);
+#endif
 
         kfree(lock->lk_name);
         kfree(lock);
@@ -179,6 +193,25 @@ lock_acquire(struct lock *lock)
 	//HANGMAN_WAIT(&curthread->t_hangman, &lock->lk_hangman);
 
         // Write this
+
+#if OPT_SHELLPROJECT
+        KASSERT(lock != NULL);
+	if (lock_do_i_hold(lock)) {
+	  kprintf("AAACKK!\n");
+	}
+	KASSERT(!(lock_do_i_hold(lock)));
+
+        KASSERT(curthread->t_in_interrupt == false);
+
+	spinlock_acquire(&lock->lk_lock);        
+	while (lock->lk_owner != NULL) {
+	  wchan_sleep(lock->lk_wchan, &lock->lk_lock);
+        }
+
+        KASSERT(lock->lk_owner == NULL);
+        lock->lk_owner=curthread;
+	spinlock_release(&lock->lk_lock);
+#endif
 
         (void)lock;  // suppress warning until code gets written
 
@@ -194,6 +227,15 @@ lock_release(struct lock *lock)
 
         // Write this
 
+#if OPT_SHELLPROJECT
+	KASSERT(lock != NULL);
+	KASSERT(lock_do_i_hold(lock));
+	spinlock_acquire(&lock->lk_lock);
+        lock->lk_owner=NULL;
+        wchan_wakeone(lock->lk_wchan, &lock->lk_lock);
+	spinlock_release(&lock->lk_lock);
+#endif
+
         (void)lock;  // suppress warning until code gets written
 }
 
@@ -201,6 +243,14 @@ bool
 lock_do_i_hold(struct lock *lock)
 {
         // Write this
+
+#if OPT_SHELLPROJECT
+        bool res;
+        spinlock_acquire(&lock->lk_lock);
+        res = lock->lk_owner == curthread;
+        spinlock_release(&lock->lk_lock);
+        return res;
+#endif
 
         (void)lock;  // suppress warning until code gets written
 
@@ -230,6 +280,16 @@ cv_create(const char *name)
 
         // add stuff here as needed
 
+#if OPT_SHELLPROJECT
+	cv->cv_wchan = wchan_create(cv->cv_name);
+	if (cv->cv_wchan == NULL) {
+	        kfree(cv->cv_name);
+		kfree(cv);
+		return NULL;
+	}
+        spinlock_init(&cv->cv_lock);
+#endif
+
         return cv;
 }
 
@@ -240,6 +300,11 @@ cv_destroy(struct cv *cv)
 
         // add stuff here as needed
 
+#if OPT_SHELLPROJECT
+	spinlock_cleanup(&cv->cv_lock);
+	wchan_destroy(cv->cv_wchan);
+#endif
+
         kfree(cv->cv_name);
         kfree(cv);
 }
@@ -248,6 +313,19 @@ void
 cv_wait(struct cv *cv, struct lock *lock)
 {
         // Write this
+
+#if OPT_SHELLPROJECT
+        KASSERT(lock != NULL);
+	KASSERT(cv != NULL);
+	KASSERT(lock_do_i_hold(lock));
+
+	spinlock_acquire(&cv->cv_lock);
+	lock_release(lock);
+	wchan_sleep(cv->cv_wchan,&cv->cv_lock);
+	spinlock_release(&cv->cv_lock);
+	lock_acquire(lock);
+#endif
+
         (void)cv;    // suppress warning until code gets written
         (void)lock;  // suppress warning until code gets written
 }
@@ -256,6 +334,17 @@ void
 cv_signal(struct cv *cv, struct lock *lock)
 {
         // Write this
+
+#if OPT_SHELLPROJECT
+        KASSERT(lock != NULL);
+	KASSERT(cv != NULL);
+	KASSERT(lock_do_i_hold(lock));
+
+	spinlock_acquire(&cv->cv_lock);
+	wchan_wakeone(cv->cv_wchan,&cv->cv_lock);
+	spinlock_release(&cv->cv_lock);
+#endif
+
 	(void)cv;    // suppress warning until code gets written
 	(void)lock;  // suppress warning until code gets written
 }
@@ -264,6 +353,16 @@ void
 cv_broadcast(struct cv *cv, struct lock *lock)
 {
 	// Write this
+
+#if OPT_SHELLPROJECT
+        KASSERT(lock != NULL);
+	KASSERT(cv != NULL);
+	KASSERT(lock_do_i_hold(lock));
+	spinlock_acquire(&cv->cv_lock);
+	wchan_wakeall(cv->cv_wchan,&cv->cv_lock);
+	spinlock_release(&cv->cv_lock);
+#endif
+
 	(void)cv;    // suppress warning until code gets written
 	(void)lock;  // suppress warning until code gets written
 }
