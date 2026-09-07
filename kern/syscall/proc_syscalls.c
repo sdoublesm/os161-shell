@@ -86,7 +86,7 @@ int sys_waitpid(pid_t pid, int *status, int options, int32_t *retval){
     // if not (so it is unaligned), it cannot contain an integer, so error EFAULT
     if (status != NULL && ((vaddr_t) status % 4 != 0)) return EFAULT;
 
-    // let's find the process, if it doesn't exist, error EINVAL
+    // let's find the process, if it doesn't exist, error ESRCH
     struct proc *p = proc_search_pid(pid);
     if (p == NULL) return ESRCH;
 
