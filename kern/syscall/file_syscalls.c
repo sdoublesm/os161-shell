@@ -117,6 +117,12 @@ int sys_read(int fd, userptr_t buf, size_t size, int32_t *retval)
 	//lock release
 	lock_release(file->lk);
 	return 0;
+#else
+	(void)fd;
+	(void)buf;
+	(void)size;
+	(void)retval;
+	return ENOSYS;
 #endif
 }
 
@@ -178,6 +184,12 @@ int sys_write(int fd, userptr_t buf, size_t size, int32_t *retval)
 
 	lock_release(file->lk);
 	return 0;
+#else
+	(void)fd;
+	(void)buf;
+	(void)size;
+	(void)retval;
+	return ENOSYS;
 #endif
 }
 
@@ -261,6 +273,12 @@ int sys_lseek(int fd, off_t offset, int whence, int64_t *retval){
 	lock_release(file->lk);
 
 	return 0; // success
+#else
+	(void)fd;
+	(void)offset;
+	(void)whence;
+	(void)retval;
+	return ENOSYS;
 #endif
 }
 
@@ -356,6 +374,12 @@ int sys_open(userptr_t pathname, int flags, mode_t mode, int32_t *retval)
 	}
 	*retval = fd;
 	return 0;
+#else
+	(void)pathname;
+	(void)flags;
+	(void)mode;
+	(void)retval;
+	return ENOSYS;
 #endif
 }
 
@@ -389,6 +413,9 @@ int sys_chdir(const_userptr_t pathname)
 	result = vfs_chdir(path);
 	kfree(path);
 	return result;
+#else
+	(void)pathname;
+	return ENOSYS;
 #endif
 }
 
@@ -423,6 +450,11 @@ int sys___getcwd(userptr_t buf, size_t buflen, int32_t *retval)
 	// byte scritti nel buffer utente
 	*retval = buflen - userio.uio_resid;
 	return 0;
+#else
+	(void)buf;
+	(void)buflen;
+	(void)retval;
+	return ENOSYS;
 #endif
 }
 
@@ -472,6 +504,9 @@ int sys_close(int fd){
 
 	openfile_decref(file);
 	return 0;
+#else
+	(void)fd;
+	return ENOSYS;
 #endif
 }
 
@@ -533,5 +568,10 @@ int sys_dup2(int oldfd, int newfd, int32_t *retval){
 
 	*retval = newfd;
 	return 0;
+#else
+	(void)oldfd;
+	(void)newfd;
+	(void)retval;
+	return ENOSYS;
 #endif
 }

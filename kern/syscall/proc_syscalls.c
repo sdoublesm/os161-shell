@@ -57,8 +57,6 @@ void sys__exit(int exitcode){
     p->exit_status = exitcode & 0xff;
     p->has_exited = true;
 
-//    proc_remthread(curthread);
-
     lock_acquire(p->p_lk);
     cv_signal(p->p_cv, p->p_lk);
     lock_release(p->p_lk);
@@ -129,6 +127,7 @@ int sys_waitpid(pid_t pid, int *status, int options, int32_t *retval){
     (void) options;
     (void) pid;
     (void) status;
+	(void) retval;
     return ENOSYS;
 #endif
 }
@@ -205,6 +204,7 @@ int sys_fork(struct trapframe *ctf, pid_t *retval){
     return 0;
 #else
     (void) ctf;
+	(void) retval;
     return ENOSYS;
 #endif
 }
