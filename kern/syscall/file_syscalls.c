@@ -344,12 +344,9 @@ int sys_open(userptr_t pathname, int flags, mode_t mode, int32_t *retval)
 	file->offset = 0;
 	file->mode = flags;
 	file->ref_count = 1;
-	
-	// vfs_open might modify kpath (e.g. using strtok). To be safe, we can just use a generic lock name 
-	// or kpath. Here we use a generic name since the path is no longer pristine.
+	// new lock to protect concurrent accesses to this openfile's fields
 	file->lk = lock_create("filelock");
-	kfree(kpath); // we can safely free it now
-	
+	kfree(kpath); 
 	if (file->lk == NULL) {
 		kfree(file);
 		vfs_close(vn);
